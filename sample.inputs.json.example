@@ -1,0 +1,11 @@
+{
+  "humanwgs_singleton.sample_id": "YOUR_SAMPLE_ID",
+  "humanwgs_singleton.sex": "MALE",
+  "humanwgs_singleton.hifi_reads": [
+    "/path/to/your/data/sample.hifi_reads.bam"
+  ],
+  "humanwgs_singleton.ref_map_file": "/path/to/hifi-wdl-resources/hifi-wdl-resources-v3.1.0/GRCh38.ref_map.v3p1p0.template.tsv",
+  "humanwgs_singleton.tertiary_map_file": "/path/to/hifi-wdl-resources/hifi-wdl-resources-v3.1.0/GRCh38.tertiary_map.v3p1p0.template.tsv",
+  "humanwgs_singleton.backend": "HPC",
+  "humanwgs_singleton.preemptible": true
+}

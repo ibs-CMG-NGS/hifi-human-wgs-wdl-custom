@@ -1,0 +1,19 @@
+name: hifi-human-wgs
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.8
+  - pip
+  # Additional utilities
+  - wget
+  - curl
+  - git
+  - pip:
+    # WDL workflow execution engines
+    - miniwdl>=1.9.0
+    # miniwdl SLURM plugin for HPC backends
+    - miniwdl-slurm
+    # Additional Python dependencies
+    - cromwell-tools

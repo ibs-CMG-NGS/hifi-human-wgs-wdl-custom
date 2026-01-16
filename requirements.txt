@@ -1,0 +1,10 @@
+# Core WDL workflow execution requirements
+miniwdl>=1.9.0
+miniwdl-slurm
+
+# Workflow management and utilities
+cromwell-tools
+
+# Additional utilities for workflow management
+pyyaml
+requests

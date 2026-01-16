@@ -1,0 +1,87 @@
+# Test files
+inputs.test_data*.json
+.wdltest*
+
+# Archives
+*.zip
+
+# Build files
+Makefile
+.env
+
+# Test directories
+tests
+miniwdl_test_output
+
+# Cache directories
+miniwdl_singularity_cache/
+miniwdl_download_cache/
+miniwdl_call_cache/
+
+# Python virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Data files (BAM files and sequencing data)
+data/
+*.bam
+*.bam.bai
+*.bai
+*.cram
+*.cram.crai
+*.fastq
+*.fastq.gz
+*.fasta.gz
+
+# Workflow run directories (timestamped execution outputs)
+20*/
+
+# Downloaded resources (large reference files)
+hifi-wdl-resources/
+
+# User-specific input configuration files
+*.inputs.json
+!*.inputs.json.example
+!workflows/*.inputs.json
+
+# Local configuration overrides
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.tsv
+
+# Temporary and execution files
+*.log
+*.tmp
+*.temp
+rerun
+error.json
+
+# Cromwell/miniwdl execution outputs
+cromwell-executions/
+cromwell-workflow-logs/
+execution/
+call-*/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+Zone.Identifier
+
+# IDE files
+.vscode/
+.idea/
+*.iml
