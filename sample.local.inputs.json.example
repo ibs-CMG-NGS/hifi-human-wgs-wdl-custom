@@ -1,0 +1,16 @@
+{
+  "humanwgs_singleton.sample_id": "YOUR_SAMPLE_ID",
+  "humanwgs_singleton.sex": "MALE",
+  "humanwgs_singleton.hifi_reads": [
+    "/path/to/your/data/sample.hifi_reads.bam"
+  ],
+  "humanwgs_singleton.ref_map_file": "/home/ygkim/ngs_pipeline/HiFi-human-WGS-WDL/hifi-wdl-resources/hifi-wdl-resources-v3.1.0/GRCh38.ref_map.v3p1p0.template.tsv",
+  "humanwgs_singleton.tertiary_map_file": "/home/ygkim/ngs_pipeline/HiFi-human-WGS-WDL/hifi-wdl-resources/hifi-wdl-resources-v3.1.0/GRCh38.tertiary_map.v3p1p0.template.tsv",
+  "humanwgs_singleton.backend": "HPC",
+  "humanwgs_singleton.preemptible": false,
+  
+  "humanwgs_singleton.total_deepvariant_tasks": 32,
+  "humanwgs_singleton.deepvariant_tasks_per_shard": 8,
+  "humanwgs_singleton.max_reads_per_alignment_chunk": 100000000,
+  "humanwgs_singleton.gpu": true
+}

@@ -48,9 +48,11 @@ hifi-wdl-resources/
 
 # Local configuration overrides
 *.local.json
+!*.local.json.example
 *.local.yaml
 *.local.yml
 *.local.tsv
+*.local.cfg
 
 # Temporary and execution files
 *.log
