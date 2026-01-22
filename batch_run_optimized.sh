@@ -9,7 +9,8 @@
 # ./batch_run_optimized.sh parallel              # 모든 샘플 병렬 실행
 # ./batch_run_optimized.sh sequential KTY9537 KTY9538  # 특정 샘플만 순차 실행
 
-set -e  # 에러 발생 시 중단
+# set -e 제거 - 수동으로 에러 처리
+set -o pipefail  # 파이프에서 에러 감지
 
 # 설정
 WORKFLOW="workflows/singleton.wdl"
@@ -151,6 +152,8 @@ run_sequential() {
         
         sample_start=$(date +%s)
         
+        # 파이프 처리 개선: set +e로 에러 무시, 수동으로 exit code 캡처
+        set +e
         miniwdl run "${WORKFLOW}" \
             --input "${input_file}" \
             --cfg "${CONFIG_FILE}" \
@@ -159,6 +162,7 @@ run_sequential() {
             2>&1 | tee "${log_file}"
         
         exit_code=${PIPESTATUS[0]}
+        set -e
         sample_end=$(date +%s)
         sample_elapsed=$((sample_end - sample_start))
         
