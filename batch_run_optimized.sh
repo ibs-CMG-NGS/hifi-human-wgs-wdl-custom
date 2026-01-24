@@ -152,8 +152,7 @@ run_sequential() {
         
         sample_start=$(date +%s)
         
-        # 파이프 처리 개선: set +e로 에러 무시, 수동으로 exit code 캡처
-        set +e
+        # 파이프 처리 개선: exit code 수동 캡처 (set -e 사용 안 함)
         miniwdl run "${WORKFLOW}" \
             --input "${input_file}" \
             --cfg "${CONFIG_FILE}" \
@@ -162,7 +161,6 @@ run_sequential() {
             2>&1 | tee "${log_file}"
         
         exit_code=${PIPESTATUS[0]}
-        set -e
         sample_end=$(date +%s)
         sample_elapsed=$((sample_end - sample_start))
         
