@@ -98,7 +98,7 @@ def parse_outputs_json(sample_dir):
         return None
 
 def parse_bam_stats(sample_dir):
-    """BAM statistics 파싱"""
+    """BAM statistics 파싱 - QC metrics 포함"""
     workflow_dir = get_workflow_dir(sample_dir)
     if not workflow_dir:
         return None
@@ -116,6 +116,43 @@ def parse_bam_stats(sample_dir):
                 if ':' in line:
                     key, value = line.strip().split(':', 1)
                     stats[key.strip()] = value.strip()
+        
+        # QC metrics 추출
+        qc_metrics = {}
+        
+        # Read length (평균)
+        if 'average length' in stats:
+            try:
+                qc_metrics['mean_read_length'] = float(stats['average length'])
+            except:
+                pass
+        
+        # Read quality (평균)
+        if 'average quality' in stats:
+            try:
+                qc_metrics['mean_read_quality'] = float(stats['average quality'])
+            except:
+                pass
+        
+        # Total reads
+        if 'sequences' in stats or 'total length' in stats:
+            try:
+                qc_metrics['total_reads'] = int(stats.get('sequences', '0').replace(',', ''))
+            except:
+                pass
+        
+        # Mapping rate (pbmm2 통계에서)
+        if 'mapped' in stats:
+            try:
+                mapped = int(stats['mapped'].replace(',', ''))
+                total = qc_metrics.get('total_reads', 0)
+                if total > 0:
+                    qc_metrics['mapping_rate'] = (mapped / total) * 100
+            except:
+                pass
+        
+        stats['qc_metrics'] = qc_metrics
+        
     except Exception as e:
         print(f"Warning: Could not parse BAM stats: {e}")
         return None
@@ -158,6 +195,62 @@ def parse_mosdepth_summary(sample_dir):
     # mean_coverage가 없으면 기본값 설정
     if 'mean_coverage' not in data:
         data['mean_coverage'] = 0
+    
+    return data
+
+def parse_workflow_log(sample_dir):
+    """workflow.log에서 실행 시간 정보 파싱"""
+    workflow_dir = get_workflow_dir(sample_dir)
+    if not workflow_dir:
+        return None
+    
+    log_file = os.path.join(workflow_dir, 'workflow.log')
+    if not os.path.exists(log_file):
+        return None
+    
+    data = {
+        'start_time': None,
+        'end_time': None,
+        'duration_seconds': 0,
+        'duration_formatted': 'Unknown'
+    }
+    
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            
+            # 첫 줄에서 시작 시간 추출
+            if lines:
+                first_line = lines[0]
+                # Format: "2026-01-20 10:17:04.123 ..."
+                import re
+                match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', first_line)
+                if match:
+                    data['start_time'] = match.group(1)
+            
+            # 마지막 줄에서 종료 시간 추출
+            if len(lines) > 1:
+                last_line = lines[-1]
+                match = re.search(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', last_line)
+                if match:
+                    data['end_time'] = match.group(1)
+            
+            # 실행 시간 계산
+            if data['start_time'] and data['end_time']:
+                from datetime import datetime
+                start = datetime.strptime(data['start_time'], '%Y-%m-%d %H:%M:%S')
+                end = datetime.strptime(data['end_time'], '%Y-%m-%d %H:%M:%S')
+                duration = end - start
+                data['duration_seconds'] = int(duration.total_seconds())
+                
+                # 포맷팅
+                hours = data['duration_seconds'] // 3600
+                minutes = (data['duration_seconds'] % 3600) // 60
+                data['duration_formatted'] = f"{hours}h {minutes}m"
+    
+    except Exception as e:
+        print(f"Warning: Could not parse workflow log: {e}")
+        return None
     
     return data
 
@@ -245,7 +338,8 @@ def collect_sample_data(batch_results_dir, sample):
         'outputs': parse_outputs_json(sample_dir),
         'bam_stats': parse_bam_stats(sample_dir),
         'coverage': parse_mosdepth_summary(sample_dir),
-        'variant_stats': parse_small_variant_stats(sample_dir)
+        'variant_stats': parse_small_variant_stats(sample_dir),
+        'workflow_log': parse_workflow_log(sample_dir)
     }
     
     # 주요 파일 크기
@@ -321,6 +415,7 @@ def generate_html_report(samples_data, batch_results_dir):
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HiFi WGS Pipeline QC Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         * {{
             margin: 0;
@@ -522,6 +617,63 @@ def generate_html_report(samples_data, batch_results_dir):
             color: #667eea;
             margin-bottom: 5px;
         }}
+        
+        .chart-container {{
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        
+        .chart-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }}
+        
+        canvas {{
+            max-height: 400px;
+        }}
+        
+        .stats-box {{
+            background: #f8f9ff;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }}
+        
+        .stats-box h4 {{
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }}
+        
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }}
+        
+        .stat-item {{
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }}
+        
+        .stat-label {{
+            font-size: 0.85em;
+            color: #666;
+            margin-bottom: 5px;
+        }}
+        
+        .stat-value {{
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+        }}
     </style>
 </head>
 <body>
@@ -577,6 +729,19 @@ def generate_html_report(samples_data, batch_results_dir):
 """
     
     html += """
+                </div>
+            </div>
+            
+            <!-- 시각화 차트 -->
+            <div class="section">
+                <h2 class="section-title">📊 Visual Analytics</h2>
+                <div class="chart-grid">
+                    <div class="chart-container">
+                        <canvas id="coverageChart"></canvas>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="variantChart"></canvas>
+                    </div>
                 </div>
             </div>
             
@@ -733,6 +898,91 @@ def generate_html_report(samples_data, batch_results_dir):
             <p>Report Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
         </div>
     </div>
+    
+    <script>
+        // Coverage 차트 데이터 준비
+        const coverageData = {{
+            labels: {json.dumps([d['sample_name'] for d in samples_data])},
+            datasets: [{{
+                label: 'Mean Coverage (×)',
+                data: {json.dumps([(d.get('coverage') or {{}}).get('mean_coverage', 0) for d in samples_data])},
+                backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                borderColor: 'rgba(102, 126, 234, 1)',
+                borderWidth: 2
+            }}]
+        }};
+        
+        // Variant 차트 데이터 준비
+        const variantData = {{
+            labels: {json.dumps([d['sample_name'] for d in samples_data])},
+            datasets: [
+                {{
+                    label: 'Small Variants',
+                    data: {json.dumps([d['variant_counts'].get('small_variants', 0) for d in samples_data])},
+                    backgroundColor: 'rgba(16, 185, 129, 0.6)',
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    borderWidth: 2
+                }},
+                {{
+                    label: 'Structural Variants',
+                    data: {json.dumps([d['variant_counts'].get('structural_variants', 0) for d in samples_data])},
+                    backgroundColor: 'rgba(245, 158, 11, 0.6)',
+                    borderColor: 'rgba(245, 158, 11, 1)',
+                    borderWidth: 2
+                }}
+            ]
+        }};
+        
+        // Coverage 차트 생성
+        const coverageCtx = document.getElementById('coverageChart').getContext('2d');
+        new Chart(coverageCtx, {{
+            type: 'bar',
+            data: coverageData,
+            options: {{
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {{
+                    title: {{
+                        display: true,
+                        text: 'Coverage Distribution Across Samples',
+                        font: {{ size: 16, weight: 'bold' }}
+                    }},
+                    legend: {{ display: true }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        title: {{ display: true, text: 'Coverage (×)' }}
+                    }}
+                }}
+            }}
+        }});
+        
+        // Variant 차트 생성
+        const variantCtx = document.getElementById('variantChart').getContext('2d');
+        new Chart(variantCtx, {{
+            type: 'bar',
+            data: variantData,
+            options: {{
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {{
+                    title: {{
+                        display: true,
+                        text: 'Variant Counts Across Samples',
+                        font: {{ size: 16, weight: 'bold' }}
+                    }},
+                    legend: {{ display: true, position: 'top' }}
+                }},
+                scales: {{
+                    y: {{
+                        beginAtZero: true,
+                        title: {{ display: true, text: 'Number of Variants' }}
+                    }}
+                }}
+            }}
+        }});
+    </script>
 </body>
 </html>
 """
