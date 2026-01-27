@@ -87,22 +87,32 @@ def parse_mosdepth_summary(sample_dir):
     summary_files = glob.glob(summary_file)
     
     if not summary_files:
-        return None
+        return {'mean_coverage': 0}
     
     data = {}
     try:
         with open(summary_files[0], 'r') as f:
-            for line in f:
+            lines = f.readlines()
+            # 헤더 스킵
+            for line in lines[1:]:  # 첫 번째 줄은 헤더
                 if line.startswith('total') or line.startswith('chr'):
                     parts = line.strip().split('\t')
                     if len(parts) >= 4:
                         region = parts[0]
-                        mean_depth = float(parts[3])
-                        if region == 'total':
-                            data['mean_coverage'] = mean_depth
+                        try:
+                            mean_depth = float(parts[3])
+                            if region == 'total':
+                                data['mean_coverage'] = mean_depth
+                                break
+                        except ValueError:
+                            continue
     except Exception as e:
         print(f"Warning: Could not parse mosdepth summary: {e}")
-        return None
+        return {'mean_coverage': 0}
+    
+    # mean_coverage가 없으면 기본값 설정
+    if 'mean_coverage' not in data:
+        data['mean_coverage'] = 0
     
     return data
 
@@ -236,9 +246,9 @@ def generate_html_report(samples_data, batch_results_dir):
     
     # 전체 통계 계산
     total_coverage = sum(
-        s['coverage']['mean_coverage'] 
+        (s.get('coverage') or {}).get('mean_coverage', 0)
         for s in samples_data 
-        if s.get('coverage') and 'mean_coverage' in s['coverage']
+        if s.get('coverage') and isinstance(s.get('coverage'), dict)
     )
     avg_coverage = total_coverage / total_samples if total_samples > 0 else 0
     
@@ -534,7 +544,8 @@ def generate_html_report(samples_data, batch_results_dir):
     
     for data in samples_data:
         sample = data['sample_name']
-        coverage = data.get('coverage', {}).get('mean_coverage', 0)
+        coverage_data = data.get('coverage') or {}
+        coverage = coverage_data.get('mean_coverage', 0) if isinstance(coverage_data, dict) else 0
         bam_size = data['file_sizes'].get('aligned_bam', 'N/A')
         
         # Coverage 평가
@@ -727,7 +738,8 @@ def main():
     
     for data in samples_data:
         sample = data['sample_name']
-        coverage = data.get('coverage', {}).get('mean_coverage', 0)
+        coverage_data = data.get('coverage') or {}
+        coverage = coverage_data.get('mean_coverage', 0) if isinstance(coverage_data, dict) else 0
         small_vars = data['variant_counts'].get('small_variants', 0)
         svs = data['variant_counts'].get('structural_variants', 0)
         
