@@ -38,18 +38,55 @@ def parse_args():
 def get_sample_names(batch_results_dir):
     """batch_results에서 샘플 이름 추출"""
     samples = []
+    
+    if not os.path.exists(batch_results_dir):
+        print(f"Warning: Directory not found: {batch_results_dir}")
+        return samples
+    
     for item in os.listdir(batch_results_dir):
         item_path = os.path.join(batch_results_dir, item)
         if os.path.isdir(item_path) and item != 'logs':
-            # _LAST 심볼릭 링크가 있는지 확인
+            # _LAST 심볼릭 링크 또는 워크플로우 디렉토리가 있는지 확인
             last_link = os.path.join(item_path, '_LAST')
-            if os.path.exists(last_link):
+            # outputs.json이 있는 첫 번째 디렉토리 찾기
+            workflow_dirs = [d for d in os.listdir(item_path) 
+                           if os.path.isdir(os.path.join(item_path, d)) 
+                           and d.startswith('202')]  # 날짜로 시작하는 디렉토리
+            
+            if os.path.exists(last_link) or workflow_dirs:
                 samples.append(item)
+    
     return sorted(samples)
+
+def get_workflow_dir(sample_dir):
+    """샘플 디렉토리에서 워크플로우 디렉토리 경로 반환 (_LAST 또는 최신 디렉토리)"""
+    last_link = os.path.join(sample_dir, '_LAST')
+    
+    # _LAST 심볼릭 링크가 있으면 사용
+    if os.path.exists(last_link):
+        return last_link
+    
+    # 없으면 날짜로 시작하는 디렉토리 중 최신 것 찾기
+    workflow_dirs = []
+    for item in os.listdir(sample_dir):
+        item_path = os.path.join(sample_dir, item)
+        if os.path.isdir(item_path) and item.startswith('202'):  # 날짜 형식
+            workflow_dirs.append((item, item_path))
+    
+    if workflow_dirs:
+        # 디렉토리명 기준 정렬 (최신이 마지막)
+        workflow_dirs.sort()
+        return workflow_dirs[-1][1]
+    
+    return None
 
 def parse_outputs_json(sample_dir):
     """outputs.json 파싱"""
-    outputs_file = os.path.join(sample_dir, '_LAST', 'outputs.json')
+    workflow_dir = get_workflow_dir(sample_dir)
+    if not workflow_dir:
+        return None
+    
+    outputs_file = os.path.join(workflow_dir, 'outputs.json')
     if not os.path.exists(outputs_file):
         return None
     
@@ -62,7 +99,11 @@ def parse_outputs_json(sample_dir):
 
 def parse_bam_stats(sample_dir):
     """BAM statistics 파싱"""
-    stats_file = os.path.join(sample_dir, '_LAST', 'out', 'bam_statistics', '*_stats.txt')
+    workflow_dir = get_workflow_dir(sample_dir)
+    if not workflow_dir:
+        return None
+    
+    stats_file = os.path.join(workflow_dir, 'out', 'bam_statistics', '*_stats.txt')
     stats_files = glob.glob(stats_file)
     
     if not stats_files:
@@ -83,7 +124,11 @@ def parse_bam_stats(sample_dir):
 
 def parse_mosdepth_summary(sample_dir):
     """mosdepth summary 파싱"""
-    summary_file = os.path.join(sample_dir, '_LAST', 'out', 'mosdepth_summary', '*.mosdepth.summary.txt')
+    workflow_dir = get_workflow_dir(sample_dir)
+    if not workflow_dir:
+        return {'mean_coverage': 0}
+    
+    summary_file = os.path.join(workflow_dir, 'out', 'mosdepth_summary', '*.mosdepth.summary.txt')
     summary_files = glob.glob(summary_file)
     
     if not summary_files:
@@ -118,7 +163,11 @@ def parse_mosdepth_summary(sample_dir):
 
 def parse_small_variant_stats(sample_dir):
     """Small variant statistics 파싱"""
-    stats_file = os.path.join(sample_dir, '_LAST', 'out', 'small_variant_stats', '*.stats.txt')
+    workflow_dir = get_workflow_dir(sample_dir)
+    if not workflow_dir:
+        return None
+    
+    stats_file = os.path.join(workflow_dir, 'out', 'small_variant_stats', '*.stats.txt')
     stats_files = glob.glob(stats_file)
     
     if not stats_files:
@@ -200,26 +249,30 @@ def collect_sample_data(batch_results_dir, sample):
     }
     
     # 주요 파일 크기
-    last_dir = os.path.join(sample_dir, '_LAST', 'out')
+    workflow_dir = get_workflow_dir(sample_dir)
+    if workflow_dir:
+        out_dir = os.path.join(workflow_dir, 'out')
+    else:
+        out_dir = ''
     
     data['file_sizes'] = {
         'aligned_bam': get_file_size(
-            glob.glob(os.path.join(last_dir, 'merged_haplotagged_bam', '*.bam'))[0]
-            if glob.glob(os.path.join(last_dir, 'merged_haplotagged_bam', '*.bam')) else ''
+            glob.glob(os.path.join(out_dir, 'merged_haplotagged_bam', '*.bam'))[0]
+            if out_dir and glob.glob(os.path.join(out_dir, 'merged_haplotagged_bam', '*.bam')) else ''
         ),
         'small_variant_vcf': get_file_size(
-            glob.glob(os.path.join(last_dir, 'phased_small_variant_vcf', '*.vcf.gz'))[0]
-            if glob.glob(os.path.join(last_dir, 'phased_small_variant_vcf', '*.vcf.gz')) else ''
+            glob.glob(os.path.join(out_dir, 'phased_small_variant_vcf', '*.vcf.gz'))[0]
+            if out_dir and glob.glob(os.path.join(out_dir, 'phased_small_variant_vcf', '*.vcf.gz')) else ''
         ),
         'sv_vcf': get_file_size(
-            glob.glob(os.path.join(last_dir, 'phased_sv_vcf', '*.vcf.gz'))[0]
-            if glob.glob(os.path.join(last_dir, 'phased_sv_vcf', '*.vcf.gz')) else ''
+            glob.glob(os.path.join(out_dir, 'phased_sv_vcf', '*.vcf.gz'))[0]
+            if out_dir and glob.glob(os.path.join(out_dir, 'phased_sv_vcf', '*.vcf.gz')) else ''
         )
     }
     
     # Variant 개수
-    small_vcf = glob.glob(os.path.join(last_dir, 'phased_small_variant_vcf', '*.vcf.gz'))
-    sv_vcf = glob.glob(os.path.join(last_dir, 'phased_sv_vcf', '*.vcf.gz'))
+    small_vcf = glob.glob(os.path.join(out_dir, 'phased_small_variant_vcf', '*.vcf.gz')) if out_dir else []
+    sv_vcf = glob.glob(os.path.join(out_dir, 'phased_sv_vcf', '*.vcf.gz')) if out_dir else []
     
     data['variant_counts'] = {
         'small_variants': count_vcf_variants(small_vcf[0]) if small_vcf else 0,

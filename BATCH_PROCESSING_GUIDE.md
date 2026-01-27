@@ -850,4 +850,48 @@ screen -S batch_processing
 ./batch_run_optimized.sh sequential && echo "Batch complete!" | mail -s "HiFi Pipeline" your@email.com
 ```
 
+### 4. 자동 QC 리포트 생성
+Batch 처리가 완료되면 자동으로 HTML QC 리포트가 생성됩니다:
+
+```bash
+# batch_run_optimized.sh 실행 시 자동 생성됨
+./batch_run_optimized.sh parallel KTY9537 KTY9538
+
+# 리포트 위치:
+# /data_4tb/hifi-human-wgs-wdl-custom/batch_results/QC_Report_YYYYMMDD_HHMMSS.html
+```
+
+**QC 리포트에 포함되는 내용:**
+- 전체 샘플 요약 통계
+- Coverage 통계 (샘플별 평균 depth)
+- Variant calling 결과 (SNPs, Indels, SVs)
+- 파일 크기 정보
+- 주요 출력 파일 상태
+- PharmCAT 결과 (약물유전체 분석)
+- Phasing 통계
+
+**수동으로 리포트 생성:**
+```bash
+# 특정 샘플들만 포함
+python3 scripts/generate_qc_report.py \
+  --batch-results /data_4tb/hifi-human-wgs-wdl-custom/batch_results \
+  --output custom_report.html \
+  --samples KTY9537 KTY9538
+
+# 모든 완료된 샘플 포함
+python3 scripts/generate_qc_report.py \
+  --batch-results /data_4tb/hifi-human-wgs-wdl-custom/batch_results \
+  --output QC_Report.html
+```
+
+**리포트 확인:**
+```bash
+# 브라우저에서 열기
+firefox /data_4tb/hifi-human-wgs-wdl-custom/batch_results/QC_Report_*.html
+
+# 또는 원격에서 접속
+# Windows에서 WSL 경로로 접근:
+# \\wsl.localhost\Ubuntu\data_4tb\hifi-human-wgs-wdl-custom\batch_results\QC_Report_*.html
+```
+
 이제 준비가 완료되었습니다! 🚀

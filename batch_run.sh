@@ -179,3 +179,30 @@ echo ""
 echo "To check the status of each sample, see:"
 echo "  ${LOG_DIR}/*.log"
 echo "========================================"
+
+# QC 리포트 생성
+echo ""
+echo "📊 Generating QC Report..."
+REPORT_SCRIPT="scripts/generate_qc_report.py"
+QC_REPORT="${OUTPUT_DIR}/QC_Report_$(date +%Y%m%d_%H%M%S).html"
+
+if [[ -f "${REPORT_SCRIPT}" ]]; then
+    python3 "${REPORT_SCRIPT}" \
+        --batch-results "${OUTPUT_DIR}" \
+        --output "${QC_REPORT}" \
+        --samples "${SAMPLES[@]}"
+    
+    if [[ $? -eq 0 ]]; then
+        echo "✅ QC Report generated: ${QC_REPORT}"
+        echo "🌐 Open in browser: file://$(realpath ${QC_REPORT})"
+    else
+        echo "⚠️  Warning: QC Report generation failed"
+    fi
+else
+    echo "⚠️  Warning: QC report script not found: ${REPORT_SCRIPT}"
+    echo "   You can generate it manually with:"
+    echo "   python3 scripts/generate_qc_report.py --batch-results ${OUTPUT_DIR}"
+fi
+
+echo ""
+echo "========================================"
