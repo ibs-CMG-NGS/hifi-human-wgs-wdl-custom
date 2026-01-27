@@ -857,11 +857,13 @@ def generate_html_report(samples_data, batch_results_dir):
         
         # 주요 출력 파일 정보
         key_outputs = [
-            ('phased_small_variant_vcf', 'Phased Small Variant VCF'),
-            ('phased_sv_vcf', 'Phased SV VCF'),
-            ('merged_haplotagged_bam', 'Haplotagged BAM'),
-            ('pharmcat_report_html', 'PharmCAT Report'),
-            ('phase_stats', 'Phasing Statistics')
+            ('humanwgs_singleton.phased_small_variant_vcf', 'Phased Small Variant VCF'),
+            ('humanwgs_singleton.phased_sv_vcf', 'Phased SV VCF'),
+            ('humanwgs_singleton.merged_haplotagged_bam', 'Haplotagged BAM'),
+            ('humanwgs_singleton.pharmcat_report_html', 'PharmCAT Report'),
+            ('humanwgs_singleton.phase_stats', 'Phasing Statistics'),
+            ('humanwgs_singleton.mosdepth_summary', 'Coverage Summary'),
+            ('humanwgs_singleton.bam_statistics', 'BAM Statistics')
         ]
         
         if outputs:
