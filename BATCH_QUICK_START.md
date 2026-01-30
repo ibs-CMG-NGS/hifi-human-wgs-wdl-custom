@@ -1,5 +1,8 @@
 # Batch Processing - 빠른 시작 가이드
 
+> **💡 완전한 가이드**: [BATCH_PROCESSING_GUIDE.md](./BATCH_PROCESSING_GUIDE.md)  
+> **📊 QC 리포트**: [QC_REPORT_GUIDE.md](./QC_REPORT_GUIDE.md)
+
 ## 📝 사용 순서
 
 ### 1단계: 샘플 정보 작성
@@ -94,6 +97,30 @@ ls -lh /data_4tb/hifi-human-wgs-wdl-custom/batch_results/summary/
 - **BAM 파일**: `<sample_id>/out/merged_haplotagged_bam/`
 - **리포트**: `<sample_id>/out/pharmcat_report_html/`
 - **통계**: `<sample_id>/out/stats_file/`
+
+---
+
+## 📊 QC 리포트 확인 ⭐
+
+배치 작업이 완료되면 **자동으로 QC 리포트**가 생성됩니다!
+
+```bash
+# 리포트 위치 확인
+ls -lh /data_4tb/hifi-human-wgs-wdl-custom/batch_results/QC_Report_*.html
+
+# 브라우저로 열기
+firefox /data_4tb/hifi-human-wgs-wdl-custom/batch_results/QC_Report_*.html
+
+# Windows에서 접근
+# \\wsl.localhost\Ubuntu\data_4tb\hifi-human-wgs-wdl-custom\batch_results\QC_Report_*.html
+```
+
+**리포트 내용:**
+- ✅ 전체 샘플 요약 통계
+- ✅ Coverage, mapping rate, variant counts
+- ✅ QC Pass/Fail 자동 판정
+
+**상세 가이드**: [QC_REPORT_GUIDE.md](./QC_REPORT_GUIDE.md)
 
 ---
 

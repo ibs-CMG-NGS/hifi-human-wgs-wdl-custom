@@ -20,6 +20,28 @@ Both workflows are designed to analyze human PacBio whole genome sequencing (WGS
 - [workflows/singleton.wdl](https://github.com/PacificBiosciences/HiFi-human-WGS-WDL/blob/main/workflows/singleton.wdl)
 - [workflows/family.wdl](https://github.com/PacificBiosciences/HiFi-human-WGS-WDL/blob/main/workflows/family.wdl)
 
+## Features
+
+### 🆕 Automated QC Reporting
+
+This pipeline includes an **automated QC report generation** feature that creates comprehensive HTML reports for batch processing results. The QC report includes:
+
+- Summary statistics for all samples
+- Read quality metrics (length, quality, mapping rate)
+- Coverage analysis (mean depth, uniformity)
+- Variant calling results (SNPs, Indels, SVs)
+- PharmCAT pharmacogenomics results
+- Phasing statistics
+- Automated quality pass/fail assessment
+
+**Learn more**: See [QC_REPORT_GUIDE.md](./QC_REPORT_GUIDE.md) for detailed documentation.
+
+### Batch Processing
+
+Multi-sample batch processing is fully supported with automatic result aggregation and QC reporting.
+
+**Learn more**: See [BATCH_PROCESSING_GUIDE.md](./BATCH_PROCESSING_GUIDE.md) for complete setup and usage instructions.
+
 ## Setup
 
 This is an actively developed workflow with multiple versioned releases, and we make use of git submodules for common tasks that are shared by multiple workflows. There are two ways to ensure you are using a supported release of the workflow and ensure that the submodules are correctly initialized:
