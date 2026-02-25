@@ -14,40 +14,79 @@ miniwdl run workflows/singleton.wdl \
 
 ## inputs.json 작성
 
-### 기본 구조
+### Human (GRCh38) 분석
 
 ```json
 {
-  "humanwgs_singleton.sample_id":    "SAMPLE_ID",
-  "humanwgs_singleton.sex":          "MALE",
-  "humanwgs_singleton.hifi_reads":   ["/path/to/sample.hifi_reads.bam"],
-  "humanwgs_singleton.ref_map_file": "/path/to/ref_map.tsv",
-  "humanwgs_singleton.backend":      "HPC",
-  "humanwgs_singleton.preemptible":  false,
-  "humanwgs_singleton.gpu":          false
+  "humanwgs_singleton.sample_id":      "SAMPLE_ID",
+  "humanwgs_singleton.sex":            "MALE",
+  "humanwgs_singleton.hifi_reads":     ["/path/to/sample.hifi_reads.bam"],
+  "humanwgs_singleton.ref_map_file":   "backends/hpc/GRCh38.ref_map.v3p1p0.hpc.tsv",
+  "humanwgs_singleton.backend":        "HPC",
+  "humanwgs_singleton.preemptible":    false,
+  "humanwgs_singleton.gpu":            false
 }
 ```
+
+Tertiary 분석(표현형 기반 variant 우선순위 결정)까지 하려면 추가:
+
+```json
+{
+  "humanwgs_singleton.tertiary_map_file": "backends/hpc/GRCh38.tertiary_map.v3p1p0.hpc.tsv",
+  "humanwgs_singleton.phenotypes":        "HP:0000001,HP:0001234"
+}
+```
+
+### Mouse (GRCm39) 분석
+
+Mouse 분석 시 human 전용 도구(PharmCAT, Paraphase, Tertiary)를 건드리지 않도록 해당 파라미터를 **제외**해야 함.
+
+```json
+{
+  "humanwgs_singleton.sample_id":      "SAMPLE_ID",
+  "humanwgs_singleton.sex":            "MALE",
+  "humanwgs_singleton.hifi_reads":     ["/path/to/sample.hifi_reads.bam"],
+  "humanwgs_singleton.ref_map_file":   "/data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv",
+  "humanwgs_singleton.backend":        "HPC",
+  "humanwgs_singleton.preemptible":    false,
+  "humanwgs_singleton.gpu":            false
+}
+```
+
+> `tertiary_map_file`과 `phenotypes`는 포함하지 않음 — Mouse population DB 없음.
 
 ### 주요 파라미터
 
 | 파라미터 | 필수 | 설명 |
 |----------|------|------|
 | `sample_id` | ✅ | 영문자·숫자·`.`·`-`·`_` 허용 |
-| `sex` | 선택 | `"MALE"` / `"FEMALE"` (미입력 시 XX 기본값) |
+| `sex` | ⚠️ 권장 | `"MALE"` / `"FEMALE"` — **반드시 입력 권장**. 미입력 시 XX(암컷) 기본값 적용. Sawfish CNV 분석에서 sex chromosome copy number 기준이 달라짐 |
 | `hifi_reads` | ✅ | HiFi unaligned BAM 경로 배열 |
 | `fail_reads` | 선택 | failed reads BAM (bait capture에 사용) |
 | `ref_map_file` | ✅ | 레퍼런스 TSV 경로 |
-| `tertiary_map_file` | 선택 | Tertiary 분석 TSV (미입력 시 스킵) |
-| `phenotypes` | 선택 | HPO 코드 (미입력 시 tertiary 스킵) |
+| `tertiary_map_file` | 선택 | Tertiary 분석 TSV — **Human only**, Mouse 시 제외 |
+| `phenotypes` | 선택 | HPO 코드 — **Human only**, Mouse 시 제외 |
 | `gpu` | 선택 | DeepVariant GPU 가속 (기본값: false) |
 | `max_reads_per_alignment_chunk` | 선택 | 기본값: 500000 |
+
+### Human/Mouse 도구 호환성
+
+| 도구 | Human | Mouse | 비고 |
+|------|-------|-------|------|
+| pbmm2, DeepVariant, HiPhase | ✅ | ✅ | Species-agnostic |
+| Sawfish (SV/CNV) | ✅ | ✅ | Mouse expected CN bed 필요 |
+| TRGT (탠덤반복) | ✅ | ✅ 부분 | Mouse catalog 사용 (UCSC 기반) |
+| pb-cpg-tools, MethBat | ✅ | ✅ | CpG island TSV 필요 |
+| PharmCAT, PBstarPhase | ✅ | ⚠️ 빈 결과 | Human PGx 전용 |
+| Paraphase | ✅ | ⚠️ 빈 결과 | Human HLA 전용 |
+| Tertiary (slivar/svpack) | ✅ | ❌ | Human population DB 필요 |
 
 ### 레퍼런스 맵 경로
 
 | 종 | ref_map_file |
 |----|-------------|
 | Human (GRCh38) | `backends/hpc/GRCh38.ref_map.v3p1p0.hpc.tsv` |
-| Mouse (GRCm39) | `GRCm39.ref_map.tsv` |
+| Mouse (GRCm39) | `GRCm39.ref_map.tsv` (절대경로 사용) |
 
 ### BAM 파일 위치 패턴 (r84285_20260219 런)
 
@@ -73,26 +112,30 @@ samtools view -H /path/to/sample.bam | grep "^@RG" | grep -oP "SM:\S+"
 
 ### inputs.json 일괄 생성 스크립트
 
+Mouse 샘플 예시 (BioSample24–27):
+
 ```bash
 cat > /tmp/make_inputs.py << 'PYEOF'
 import json
 
 RAW = "/data_4tb/pacbio_rawdata/RUN_DIR"       # 실제 런 디렉토리로 변경
-REF = "/data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv"  # 또는 GRCh38
+REF = "/data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv"
 
 samples = [
-    {"id": "SAMPLE_ID_1", "dir": "1_A01", "bam": "BAMFILE1.bam"},
-    {"id": "SAMPLE_ID_2", "dir": "1_B01", "bam": "BAMFILE2.bam"},
+    {"id": "SAMPLE_ID_1", "sex": "MALE",   "dir": "1_A01", "bam": "BAMFILE1.bam"},
+    {"id": "SAMPLE_ID_2", "sex": "FEMALE", "dir": "1_B01", "bam": "BAMFILE2.bam"},
 ]
 
 for s in samples:
     d = {
         "humanwgs_singleton.sample_id":    s["id"],
+        "humanwgs_singleton.sex":          s["sex"],
         "humanwgs_singleton.hifi_reads":   [f"{RAW}/{s['dir']}/hifi_reads/{s['bam']}"],
         "humanwgs_singleton.ref_map_file": REF,
         "humanwgs_singleton.backend":      "HPC",
         "humanwgs_singleton.preemptible":  False,
         "humanwgs_singleton.gpu":          False,
+        # Mouse: tertiary_map_file, phenotypes 제외
     }
     fname = f"/data_4tb/hifi-human-wgs-wdl-custom/{s['id']}.inputs.json"
     with open(fname, "w") as f:

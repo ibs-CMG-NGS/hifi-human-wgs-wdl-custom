@@ -115,6 +115,42 @@ nvidia-smi                         # 점유 프로세스 확인
 
 ---
 
+## Sawfish 오류
+
+### expected copy number genome regions record has 4 columns where at least 5 are required
+
+```
+thread 'main' panicked at src/genome_regions.rs:226:9:
+expected copy number genome regions record has 4 columns where at least 5 are required
+```
+
+#### 원인
+
+`expected_cn.bed` 파일 형식 오류. Sawfish는 5컬럼을 요구함:
+
+| chrom | start | end | **name** | copy_number |
+|-------|-------|-----|----------|-------------|
+| chr1  | 0 | 195154279 | chr1 | 2 |
+
+`name` 컬럼(4번째)이 없으면 crash.
+
+#### 해결
+
+```bash
+cd /data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39
+
+# name 컬럼(염색체명) 삽입
+awk 'BEGIN{OFS="\t"} {print $1, $2, $3, $1, $4}' expected_cn.mm39.XX.bed > tmp.bed && mv tmp.bed expected_cn.mm39.XX.bed
+awk 'BEGIN{OFS="\t"} {print $1, $2, $3, $1, $4}' expected_cn.mm39.XY.bed > tmp.bed && mv tmp.bed expected_cn.mm39.XY.bed
+
+# 확인 (5컬럼인지)
+head -3 expected_cn.mm39.XX.bed
+```
+
+수정 후 파이프라인 재실행 (failed 태스크는 자동으로 캐시 미적용).
+
+---
+
 ## 레퍼런스 파일 오류
 
 ### ref_map TSV 경로 오류
