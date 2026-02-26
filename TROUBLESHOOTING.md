@@ -162,6 +162,23 @@ while IFS=$'\t' read -r key val; do
 done < GRCm39.ref_map.tsv
 ```
 
+### Mouse 분석에서 PBstarPhase crash
+
+```
+thread 'main' panicked at src/data_types/normalized_variant.rs:66:37:
+range end index 201060815 out of range for slice of length 195154279
+```
+
+**원인:** pbstarphase가 human PGx DB의 유전자 위치(예: CACNA1S chr1:201Mbp)를 mouse genome(chr1: 195Mbp)에서 조회하다 범위 초과 panic.
+
+**해결:** `GRCm39.ref_map.tsv`에서 pharmcat 항목 제거:
+
+```bash
+sed -i '/^pharmcat/d' /data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv
+```
+
+제거 후 재실행하면 pbstarphase 및 PharmCAT 단계가 자동으로 건너뜀 (call cache로 완료 태스크 재사용).
+
 ### Mouse 분석에서 PharmCAT/Paraphase 에러
 
 Mouse genome에서 human 전용 도구 실행 시 빈 결과 또는 에러 발생 — 정상적인 동작임.

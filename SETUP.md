@@ -107,8 +107,11 @@ miniwdl run workflows/singleton.wdl \
 |------|-----------|------|
 | pbmm2, DeepVariant, Sawfish, HiPhase | ✅ 정상 | Species-agnostic |
 | TRGT | ✅ 부분적 | Mouse catalog 사용 (UCSC 기반) |
-| PharmCAT, PBstarPhase | ⚠️ 빈 결과 | Human PGx 전용 |
+| pb-cpg-tools, MethBat | ✅ 정상 | CpG island TSV 필요 |
+| PharmCAT, PBstarPhase | ❌ crash | Human 염색체 위치로 Mouse genome 조회 → 범위 초과 panic |
 | Paraphase | ⚠️ 빈 결과 | Human HLA 전용 |
 | Tertiary 분석 | ❌ 미적용 | Human population DB 필요 |
 
-Mouse 실행 시 `tertiary_map_file`과 `phenotypes`는 inputs.json에서 제외.
+Mouse 실행 시 반드시:
+- `GRCm39.ref_map.tsv`에서 `pharmcat_positions_vcf`, `pharmcat_positions_vcf_index` 줄 제거
+- `inputs.json`에서 `tertiary_map_file`, `phenotypes` 제외

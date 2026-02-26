@@ -77,7 +77,7 @@ Mouse 분석 시 human 전용 도구(PharmCAT, Paraphase, Tertiary)를 건드리
 | Sawfish (SV/CNV) | ✅ | ✅ | Mouse expected CN bed 필요 |
 | TRGT (탠덤반복) | ✅ | ✅ 부분 | Mouse catalog 사용 (UCSC 기반) |
 | pb-cpg-tools, MethBat | ✅ | ✅ | CpG island TSV 필요 |
-| PharmCAT, PBstarPhase | ✅ | ⚠️ 빈 결과 | Human PGx 전용 |
+| PharmCAT, PBstarPhase | ✅ | ❌ crash | ref_map에서 pharmcat 줄 제거 필수 |
 | Paraphase | ✅ | ⚠️ 빈 결과 | Human HLA 전용 |
 | Tertiary (slivar/svpack) | ✅ | ❌ | Human population DB 필요 |
 
