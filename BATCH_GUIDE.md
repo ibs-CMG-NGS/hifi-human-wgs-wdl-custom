@@ -24,7 +24,7 @@ miniwdl run workflows/singleton.wdl \
   "humanwgs_singleton.ref_map_file":   "backends/hpc/GRCh38.ref_map.v3p1p0.hpc.tsv",
   "humanwgs_singleton.backend":        "HPC",
   "humanwgs_singleton.preemptible":    false,
-  "humanwgs_singleton.gpu":            false
+  "humanwgs_singleton.gpu":            true
 }
 ```
 
@@ -49,7 +49,8 @@ Mouse 분석 시 human 전용 도구(PharmCAT, Paraphase, Tertiary)를 건드리
   "humanwgs_singleton.ref_map_file":   "/data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv",
   "humanwgs_singleton.backend":        "HPC",
   "humanwgs_singleton.preemptible":    false,
-  "humanwgs_singleton.gpu":            false
+  "humanwgs_singleton.gpu":            true,
+  "humanwgs_singleton.run_pgx":        false
 }
 ```
 
@@ -134,7 +135,8 @@ for s in samples:
         "humanwgs_singleton.ref_map_file": REF,
         "humanwgs_singleton.backend":      "HPC",
         "humanwgs_singleton.preemptible":  False,
-        "humanwgs_singleton.gpu":          False,
+        "humanwgs_singleton.gpu":          True,
+        "humanwgs_singleton.run_pgx":      False,  # Mouse: PBstarPhase/PharmCAT 건너뜀
         # Mouse: tertiary_map_file, phenotypes 제외
     }
     fname = f"/data_4tb/hifi-human-wgs-wdl-custom/{s['id']}.inputs.json"
@@ -148,6 +150,26 @@ python3 /tmp/make_inputs.py
 
 ## 실행
 
+### 결과 디렉토리 구조
+
+miniwdl은 `--dir`로 지정한 경로 아래에 실행 디렉토리를 자동 생성합니다:
+
+```
+--dir batch_results/BioSample24/
+└── batch_results/
+    └── BioSample24/
+        ├── _LAST → 20260227_095049_humanwgs_singleton/   ← 최신 실행 심볼릭 링크
+        └── 20260227_095049_humanwgs_singleton/            ← {날짜}_{시간}_{workflow명}
+            └── out/
+                ├── merged_haplotagged_bam/
+                ├── phased_small_variant_vcf/
+                └── ...
+```
+
+`_LAST`는 같은 샘플을 재실행할 때마다 최신 디렉토리로 자동 갱신됩니다.
+
+**샘플별 `--dir`을 지정하는 것을 권장** — QC 리포트 스크립트가 샘플을 자동 감지합니다.
+
 ### 단일 샘플
 
 ```bash
@@ -155,7 +177,7 @@ cd /data_4tb/hifi-human-wgs-wdl-custom
 
 miniwdl run workflows/singleton.wdl \
   --input BioSample24.inputs.json \
-  --dir batch_results/ \
+  --dir batch_results/BioSample24/ \
   --verbose \
   2>&1 | tee batch_results/BioSample24.run.log
 ```
@@ -169,7 +191,7 @@ for sample in BioSample24 BioSample25 BioSample26 BioSample27; do
   echo "=== 시작: $sample $(date) ==="
   miniwdl run workflows/singleton.wdl \
     --input ${sample}.inputs.json \
-    --dir batch_results/ \
+    --dir batch_results/${sample}/ \
     --verbose \
     2>&1 | tee batch_results/${sample}.run.log
   echo "=== 완료: $sample $(date) ==="
@@ -185,7 +207,7 @@ nohup bash -c '
 for sample in BioSample24 BioSample25 BioSample26 BioSample27; do
   miniwdl run workflows/singleton.wdl \
     --input ${sample}.inputs.json \
-    --dir batch_results/ \
+    --dir batch_results/${sample}/ \
     --verbose \
     2>&1 | tee batch_results/${sample}.run.log
 done' > batch_results/batch_master.log 2>&1 &
@@ -242,6 +264,23 @@ batch_results/
 ```
 
 파이프라인이 내부에서 자동으로 merge함.
+
+## QC 리포트 생성
+
+모든 샘플 완료 후 HTML 리포트를 생성합니다 (샘플별 커버리지·변이 통계 시각화):
+
+```bash
+cd /data_4tb/hifi-human-wgs-wdl-custom
+
+python3 scripts/generate_qc_report.py \
+  --batch-results batch_results/ \
+  --samples BioSample24 BioSample25 BioSample26 BioSample27 \
+  --output batch_results/QC_Report.html
+```
+
+생성된 `QC_Report.html`을 브라우저에서 열면 됩니다.
+
+> 샘플별 `--dir batch_results/${sample}/` 구조를 사용했다면 `--samples` 없이도 자동 감지됩니다.
 
 ## Call Cache 활용
 

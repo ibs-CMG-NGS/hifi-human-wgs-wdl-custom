@@ -78,7 +78,7 @@ workflow humanwgs_family {
     Int? glnexus_mem_gb
     Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
 
-    Boolean gpu = false
+    Boolean gpu = true
 
     # Backend configuration
     String backend

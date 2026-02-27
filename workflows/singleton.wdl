@@ -84,7 +84,7 @@ workflow humanwgs_singleton {
     Int max_reads_per_alignment_chunk = 500000
     Int pharmcat_min_coverage = 10
 
-    Boolean gpu = false
+    Boolean gpu = true
     Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
 
     # Backend configuration
