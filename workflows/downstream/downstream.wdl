@@ -169,34 +169,38 @@ workflow downstream {
     }
   }
 
-  call Pbstarphase.pbstarphase_diplotype {
-    input:
-      sample_id                           = sample_id,
-      phased_small_variant_vcf            = hiphase.phased_vcfs[0],
-      phased_small_variant_vcf_index      = hiphase.phased_vcf_indices[0],
-      phased_structural_variant_vcf       = hiphase.phased_vcfs[1],
-      phased_structural_variant_vcf_index = hiphase.phased_vcf_indices[1],
-      aligned_bam                         = hiphase.haplotagged_bam,
-      aligned_bam_index                   = hiphase.haplotagged_bam_index,
-      ref_fasta                           = ref_map["fasta"],              # !FileCoercion
-      ref_index                           = ref_map["fasta_index"],        # !FileCoercion
-      runtime_attributes                  = default_runtime_attributes
-  }
+  # Run PBstarPhase and PharmCAT only when pharmcat_positions_vcf is present in ref_map
+  # (human-only tools; skip for non-human references such as mouse)
+  if (contains(keys(ref_map), "pharmcat_positions_vcf")) {
+    call Pbstarphase.pbstarphase_diplotype {
+      input:
+        sample_id                           = sample_id,
+        phased_small_variant_vcf            = hiphase.phased_vcfs[0],
+        phased_small_variant_vcf_index      = hiphase.phased_vcf_indices[0],
+        phased_structural_variant_vcf       = hiphase.phased_vcfs[1],
+        phased_structural_variant_vcf_index = hiphase.phased_vcf_indices[1],
+        aligned_bam                         = hiphase.haplotagged_bam,
+        aligned_bam_index                   = hiphase.haplotagged_bam_index,
+        ref_fasta                           = ref_map["fasta"],              # !FileCoercion
+        ref_index                           = ref_map["fasta_index"],        # !FileCoercion
+        runtime_attributes                  = default_runtime_attributes
+    }
 
-  call Pharmcat.pharmcat {
-    input:
-      sample_id                  = sample_id,
-      haplotagged_bam            = hiphase.haplotagged_bam,
-      haplotagged_bam_index      = hiphase.haplotagged_bam_index,
-      phased_vcf                 = hiphase.phased_vcfs[0],
-      phased_vcf_index           = hiphase.phased_vcf_indices[0],
-      input_tsvs                 = [pbstarphase_diplotype.pharmcat_tsv],
-      ref_fasta                  = ref_map["fasta"],                        # !FileCoercion
-      ref_index                  = ref_map["fasta_index"],                  # !FileCoercion
-      pharmcat_positions         = ref_map["pharmcat_positions_vcf"],       # !FileCoercion
-      pharmcat_positions_index   = ref_map["pharmcat_positions_vcf_index"], # !FileCoercion
-      pharmcat_min_coverage      = pharmcat_min_coverage,
-      default_runtime_attributes = default_runtime_attributes
+    call Pharmcat.pharmcat {
+      input:
+        sample_id                  = sample_id,
+        haplotagged_bam            = hiphase.haplotagged_bam,
+        haplotagged_bam_index      = hiphase.haplotagged_bam_index,
+        phased_vcf                 = hiphase.phased_vcfs[0],
+        phased_vcf_index           = hiphase.phased_vcf_indices[0],
+        input_tsvs                 = [select_first([pbstarphase_diplotype.pharmcat_tsv])],
+        ref_fasta                  = ref_map["fasta"],                        # !FileCoercion
+        ref_index                  = ref_map["fasta_index"],                  # !FileCoercion
+        pharmcat_positions         = ref_map["pharmcat_positions_vcf"],       # !FileCoercion
+        pharmcat_positions_index   = ref_map["pharmcat_positions_vcf_index"], # !FileCoercion
+        pharmcat_min_coverage      = pharmcat_min_coverage,
+        default_runtime_attributes = default_runtime_attributes
+    }
   }
 
   output {
@@ -270,8 +274,8 @@ workflow downstream {
     String stat_methbat_unmethylated_count = select_first([methbat.stat_methbat_unmethylated_count, "0"])
     String stat_methbat_asm_count          = select_first([methbat.stat_methbat_asm_count, "0"])
 
-    # pbstarphase outputs
-    File pbstarphase_json = pbstarphase_diplotype.out_json
+    # pbstarphase outputs (optional: skipped for non-human references)
+    File? pbstarphase_json = pbstarphase_diplotype.out_json
 
     # pharmcat and pangu outputs
     File? pharmcat_match_json     = pharmcat.pharmcat_match_json

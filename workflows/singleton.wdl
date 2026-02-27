@@ -343,7 +343,7 @@ workflow humanwgs_singleton {
     File mitorsaw_hap_stats = upstream.mitorsaw_hap_stats
 
     # PGx outputs
-    File  pbstarphase_json        = downstream.pbstarphase_json
+    File? pbstarphase_json        = downstream.pbstarphase_json
     File? pharmcat_match_json     = downstream.pharmcat_match_json
     File? pharmcat_phenotype_json = downstream.pharmcat_phenotype_json
     File? pharmcat_report_html    = downstream.pharmcat_report_html
