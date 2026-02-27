@@ -85,6 +85,7 @@ workflow humanwgs_singleton {
     Int pharmcat_min_coverage = 10
 
     Boolean gpu = false
+    Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
 
     # Backend configuration
     String backend
@@ -149,6 +150,7 @@ workflow humanwgs_singleton {
       aligned_bam                = upstream.out_bam,
       aligned_bam_index          = upstream.out_bam_index,
       pharmcat_min_coverage      = pharmcat_min_coverage,
+      run_pgx                    = run_pgx,
       ref_map_file               = ref_map_file,
       default_runtime_attributes = default_runtime_attributes
   }

@@ -73,6 +73,8 @@ workflow downstream {
 
     Int pharmcat_min_coverage
 
+    Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
+
     File ref_map_file
 
     RuntimeAttributes default_runtime_attributes
@@ -169,9 +171,9 @@ workflow downstream {
     }
   }
 
-  # Run PBstarPhase and PharmCAT only when pharmcat_positions_vcf is present in ref_map
-  # (human-only tools; skip for non-human references such as mouse)
-  if (contains(keys(ref_map), "pharmcat_positions_vcf")) {
+  # Run PBstarPhase and PharmCAT only for human references (run_pgx = true)
+  # set run_pgx = false for non-human references such as mouse
+  if (run_pgx) {
     call Pbstarphase.pbstarphase_diplotype {
       input:
         sample_id                           = sample_id,

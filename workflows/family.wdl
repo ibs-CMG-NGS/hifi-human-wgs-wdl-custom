@@ -76,6 +76,7 @@ workflow humanwgs_family {
     Int max_reads_per_alignment_chunk = 500000
     Int pharmcat_min_coverage = 10
     Int? glnexus_mem_gb
+    Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
 
     Boolean gpu = false
 
@@ -184,6 +185,7 @@ workflow humanwgs_family {
         aligned_bam                = upstream.out_bam[sample_index],
         aligned_bam_index          = upstream.out_bam_index[sample_index],
         pharmcat_min_coverage      = pharmcat_min_coverage,
+        run_pgx                    = run_pgx,
         ref_map_file               = ref_map_file,
         default_runtime_attributes = default_runtime_attributes
     }
