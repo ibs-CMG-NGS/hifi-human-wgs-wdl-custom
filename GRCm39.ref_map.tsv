@@ -1,0 +1,9 @@
+name	GRCm39
+fasta	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/mouse_GRCm39.fasta
+fasta_index	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/mouse_GRCm39.fasta.fai
+trgt_tandem_repeat_bed	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/trgt_mm39.bed.gz
+sawfish_exclude_bed	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/sawfish_exclude_mm39.bed.gz
+sawfish_exclude_bed_index	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/sawfish_exclude_mm39.bed.gz.tbi
+sawfish_expected_bed_male	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/expected_cn.mm39.XY.bed
+sawfish_expected_bed_female	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/expected_cn.mm39.XX.bed
+methbat_region_tsv	/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/cpgIslandExt.sorted.mm39.tsv

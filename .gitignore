@@ -41,6 +41,10 @@ data/
 # Downloaded resources (large reference files)
 hifi-wdl-resources/
 
+# QC report outputs and binary docs
+batch_results/
+docs/*.pdf
+
 # User-specific input configuration files
 *.inputs.json
 !*.inputs.json.example
