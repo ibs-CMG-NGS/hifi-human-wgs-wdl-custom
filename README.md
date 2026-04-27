@@ -4,13 +4,59 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 
 ## 문서 안내
 
+### 운영 가이드
+
+이 서버 환경에 맞춘 실무 가이드입니다.
+
 | 문서 | 읽어야 할 때 |
 |------|------------|
-| [SETUP.md](./SETUP.md) | 처음 환경 구축 시 |
-| [BATCH_GUIDE.md](./BATCH_GUIDE.md) | 샘플 실행 시 (단일/배치) |
-| [SERVER_GUIDE.md](./SERVER_GUIDE.md) | 서버 설정·GPU·리소스 변경 시 |
-| [GIT_WORKFLOW.md](./GIT_WORKFLOW.md) | 코드/설정 버전 관리 시 |
-| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | 에러 발생 시 |
+| [INSTALL.md](./INSTALL.md) | 처음 서버에 필수 도구(Conda, Apptainer, NVIDIA 드라이버 등) 설치 시 |
+| [SETUP.md](./SETUP.md) | 파이프라인 환경 구축 시 (miniwdl 설정, 레퍼런스 데이터, 이미지 캐시) |
+| [BATCH_GUIDE.md](./BATCH_GUIDE.md) | 샘플 실행 시 — inputs.json 작성, 단일/배치 실행, 결과 구조, QC 리포트 |
+| [SERVER_GUIDE.md](./SERVER_GUIDE.md) | 서버 스펙·miniwdl 설정·GPU 설정·디스크 관리 |
+| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | 에러 발생 시 — Cross-device link, Singularity, GPU, Sawfish, Mouse 분석 오류 |
+| [GIT_WORKFLOW.md](./GIT_WORKFLOW.md) | 코드/설정 버전 관리, Windows ↔ 서버 동기화 |
+
+### 기술 레퍼런스
+
+워크플로우 입출력 스펙, 파일 포맷 명세, 도구별 상세 문서입니다.
+
+**워크플로우 I/O**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/singleton.md](./docs/singleton.md) | singleton.wdl 전체 입력/출력 파라미터 및 DAG |
+| [docs/family.md](./docs/family.md) | family.wdl 전체 입력/출력 파라미터 및 DAG |
+
+**파일 포맷 명세**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/ref_map.md](./docs/ref_map.md) | ref_map TSV 키 목록 및 설명 |
+| [docs/tertiary_map.md](./docs/tertiary_map.md) | tertiary_map TSV 키 목록 및 설명 |
+| [docs/tertiary.md](./docs/tertiary.md) | Tertiary 분석 (slivar/svpack) 상세 |
+
+**도구별 상세**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/deepvariant.md](./docs/deepvariant.md) | DeepVariant 설정 |
+| [docs/pbmm2.md](./docs/pbmm2.md) | pbmm2 정렬 옵션 |
+| [docs/trgt.md](./docs/trgt.md) | TRGT 탠덤반복 genotyping |
+| [docs/pharmcat.md](./docs/pharmcat.md) | PharmCAT 약물유전체 분석 |
+| [docs/gpu.md](./docs/gpu.md) | GPU 지원 설정 및 클라우드별 GPU 타입 |
+| [docs/bam_statistics.md](./docs/bam_statistics.md) | BAM 통계 항목 설명 |
+| [docs/tools_containers.md](./docs/tools_containers.md) | 도구 버전 및 컨테이너 이미지 목록 |
+
+**백엔드 설정**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/backend-hpc.md](./docs/backend-hpc.md) | HPC (이 서버) 설정 |
+| [docs/backend-gcp.md](./docs/backend-gcp.md) | Google Cloud 설정 |
+| [docs/backend-azure.md](./docs/backend-azure.md) | Azure 설정 |
+| [docs/backend-dnanexus.md](./docs/backend-dnanexus.md) | DNAnexus 설정 |
+| [docs/backend-aws-healthomics.md](./docs/backend-aws-healthomics.md) | AWS HealthOmics 설정 |
 
 ## 워크플로우 구성
 
