@@ -109,12 +109,27 @@ pbmm2 (정렬)
 ```bash
 conda activate hifi-human-wgs
 cd /data_4tb/hifi-human-wgs-wdl-custom
-
-miniwdl run workflows/singleton.wdl \
-  --input BioSample24.inputs.json \
-  --dir batch_results/ \
-  --verbose 2>&1 | tee batch_results/BioSample24.run.log
 ```
+
+**Reference-based 분석 (기본)**
+
+```bash
+miniwdl run workflows/singleton.wdl \
+  --input {SAMPLE}.inputs.json \
+  --dir /path/to/output/{SAMPLE} \
+  --verbose 2>&1 | tee /path/to/output/{SAMPLE}.log
+```
+
+**De novo assembly 포함 (run_assembly=true)**
+
+```bash
+miniwdl run workflows/singleton.wdl \
+  --input {SAMPLE}.assembly.inputs.json \
+  --dir /path/to/output/{SAMPLE} \
+  --verbose 2>&1 | tee /path/to/output/{SAMPLE}.assembly.log
+```
+
+> `--dir`을 동일하게 지정하면 call cache가 reference-based tasks를 스킵하고 assembly tasks만 실행합니다.
 
 ---
 
