@@ -7,6 +7,10 @@ import "upstream/upstream.wdl" as Upstream
 import "downstream/downstream.wdl" as Downstream
 import "tertiary/tertiary.wdl" as TertiaryAnalysis
 import "wdl-common/wdl/tasks/utilities.wdl" as Utilities
+import "wdl-common/wdl/tasks/hifiasm.wdl"   as Hifiasm
+import "wdl-common/wdl/tasks/busco.wdl"     as Busco
+import "wdl-common/wdl/tasks/merqury.wdl"   as Merqury
+import "wdl-common/wdl/tasks/asm_ref.wdl"   as AsmRef
 
 workflow humanwgs_singleton {
   meta {
@@ -68,6 +72,12 @@ workflow humanwgs_singleton {
     debug_version: {
       name: "Debug version for testing purposes"
     }
+    run_assembly: {
+      name: "Run de novo assembly with hifiasm and QC (BUSCO, Merqury)"
+    }
+    busco_lineage: {
+      name: "BUSCO lineage dataset for assembly completeness evaluation"
+    }
   }
 
   input {
@@ -85,7 +95,9 @@ workflow humanwgs_singleton {
     Int pharmcat_min_coverage = 10
 
     Boolean gpu = true
-    Boolean run_pgx = true  # set to false for non-human references (e.g. mouse)
+    Boolean run_pgx = true      # set to false for non-human references (e.g. mouse)
+    Boolean run_assembly = false # run hifiasm de novo assembly + BUSCO + Merqury QC
+    String  busco_lineage = "mammalia_odb10"  # BUSCO lineage; change per species
 
     # Backend configuration
     String backend
@@ -155,6 +167,121 @@ workflow humanwgs_singleton {
       default_runtime_attributes = default_runtime_attributes
   }
 
+  if (run_assembly) {
+    call Hifiasm.hifiasm {
+      input:
+        sample_id          = sample_id,
+        hifi_reads         = hifi_reads,
+        out_prefix         = sample_id + ".hifiasm",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Hifiasm.gfa_to_fasta as gfa_to_fasta_primary {
+      input:
+        gfa                = hifiasm.primary_gfa,
+        out_prefix         = sample_id + ".hifiasm.bp.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Hifiasm.gfa_to_fasta as gfa_to_fasta_hap1 {
+      input:
+        gfa                = hifiasm.hap1_gfa,
+        out_prefix         = sample_id + ".hifiasm.bp.hap1.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Hifiasm.gfa_to_fasta as gfa_to_fasta_hap2 {
+      input:
+        gfa                = hifiasm.hap2_gfa,
+        out_prefix         = sample_id + ".hifiasm.bp.hap2.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Busco.busco as busco_primary {
+      input:
+        assembly_fasta     = gfa_to_fasta_primary.fasta,
+        out_prefix         = sample_id + ".hifiasm.bp.p_ctg",
+        lineage            = busco_lineage,
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Busco.busco as busco_hap1 {
+      input:
+        assembly_fasta     = gfa_to_fasta_hap1.fasta,
+        out_prefix         = sample_id + ".hifiasm.bp.hap1.p_ctg",
+        lineage            = busco_lineage,
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Busco.busco as busco_hap2 {
+      input:
+        assembly_fasta     = gfa_to_fasta_hap2.fasta,
+        out_prefix         = sample_id + ".hifiasm.bp.hap2.p_ctg",
+        lineage            = busco_lineage,
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Merqury.meryl_count {
+      input:
+        hifi_reads         = hifi_reads,
+        out_prefix         = sample_id + ".hifiasm",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call Merqury.merqury {
+      input:
+        meryl_db           = meryl_count.meryl_db,
+        hap1_fasta         = gfa_to_fasta_hap1.fasta,
+        hap2_fasta         = gfa_to_fasta_hap2.fasta,
+        out_prefix         = sample_id + ".hifiasm",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    # --- assembly-to-reference: minimap2 + SyRI (hap1, hap2) ---
+    call AsmRef.minimap2_asm_to_ref as minimap2_hap1 {
+      input:
+        assembly_fasta     = gfa_to_fasta_hap1.fasta,
+        ref_fasta          = ref_map["fasta"],           # !FileCoercion
+        out_prefix         = sample_id + ".hifiasm.bp.hap1.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call AsmRef.minimap2_asm_to_ref as minimap2_hap2 {
+      input:
+        assembly_fasta     = gfa_to_fasta_hap2.fasta,
+        ref_fasta          = ref_map["fasta"],           # !FileCoercion
+        out_prefix         = sample_id + ".hifiasm.bp.hap2.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call AsmRef.syri as syri_hap1 {
+      input:
+        paf                = minimap2_hap1.paf,
+        assembly_fasta     = gfa_to_fasta_hap1.fasta,
+        ref_fasta          = ref_map["fasta"],           # !FileCoercion
+        out_prefix         = sample_id + ".hifiasm.bp.hap1.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    call AsmRef.syri as syri_hap2 {
+      input:
+        paf                = minimap2_hap2.paf,
+        assembly_fasta     = gfa_to_fasta_hap2.fasta,
+        ref_fasta          = ref_map["fasta"],           # !FileCoercion
+        out_prefix         = sample_id + ".hifiasm.bp.hap2.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+
+    # --- assembly-to-reference: QUAST (primary) ---
+    call AsmRef.quast {
+      input:
+        assembly_fasta     = gfa_to_fasta_primary.fasta,
+        ref_fasta          = ref_map["fasta"],           # !FileCoercion
+        out_prefix         = sample_id + ".hifiasm.bp.p_ctg",
+        runtime_attributes = default_runtime_attributes
+    }
+  }
+
   Map[String, String] pedigree_sex = {
     "MALE": "1",
     "FEMALE": "2",
@@ -219,7 +346,28 @@ workflow humanwgs_singleton {
     ['sv_SWAP_count', downstream.stat_sv_SWAP_count],
     ['sv_BND_count', downstream.stat_sv_BND_count],
     ['trgt_genotyped_count', upstream.stat_trgt_genotyped_count],
-    ['trgt_uncalled_count', upstream.stat_trgt_uncalled_count]
+    ['trgt_uncalled_count', upstream.stat_trgt_uncalled_count],
+    ['assembly_primary_size',  select_first([gfa_to_fasta_primary.stat_assembly_size, "0"])],
+    ['assembly_primary_ctgs',  select_first([gfa_to_fasta_primary.stat_contig_count,  "0"])],
+    ['assembly_hap1_size',     select_first([gfa_to_fasta_hap1.stat_assembly_size,    "0"])],
+    ['assembly_hap1_ctgs',     select_first([gfa_to_fasta_hap1.stat_contig_count,     "0"])],
+    ['assembly_hap2_size',     select_first([gfa_to_fasta_hap2.stat_assembly_size,    "0"])],
+    ['assembly_hap2_ctgs',     select_first([gfa_to_fasta_hap2.stat_contig_count,     "0"])],
+    ['busco_primary_complete', select_first([busco_primary.stat_complete,             "0"])],
+    ['busco_primary_single',   select_first([busco_primary.stat_single,               "0"])],
+    ['busco_primary_missing',  select_first([busco_primary.stat_missing,              "0"])],
+    ['merqury_qv',             select_first([merqury.stat_qv,                         "0"])],
+    ['merqury_completeness',   select_first([merqury.stat_completeness,               "0"])],
+    ['quast_n50',             select_first([quast.stat_n50,             "0"])],
+    ['quast_ng50',            select_first([quast.stat_ng50,            "0"])],
+    ['quast_misassemblies',   select_first([quast.stat_misassemblies,   "0"])],
+    ['quast_genome_fraction', select_first([quast.stat_genome_fraction, "0"])],
+    ['syri_hap1_inv',         select_first([syri_hap1.stat_inv_count,   "0"])],
+    ['syri_hap1_trans',       select_first([syri_hap1.stat_trans_count, "0"])],
+    ['syri_hap1_dup',         select_first([syri_hap1.stat_dup_count,   "0"])],
+    ['syri_hap2_inv',         select_first([syri_hap2.stat_inv_count,   "0"])],
+    ['syri_hap2_trans',       select_first([syri_hap2.stat_trans_count, "0"])],
+    ['syri_hap2_dup',         select_first([syri_hap2.stat_dup_count,   "0"])]
   ]
 
   call Utilities.consolidate_stats {
@@ -361,6 +509,54 @@ workflow humanwgs_singleton {
     File? tertiary_sv_filtered_vcf                      = tertiary_analysis.sv_filtered_vcf
     File? tertiary_sv_filtered_vcf_index                = tertiary_analysis.sv_filtered_vcf_index
     File? tertiary_sv_filtered_tsv                      = tertiary_analysis.sv_filtered_tsv
+
+    # de novo assembly outputs (only present when run_assembly = true)
+    File? assembly_primary_gfa   = hifiasm.primary_gfa
+    File? assembly_hap1_gfa      = hifiasm.hap1_gfa
+    File? assembly_hap2_gfa      = hifiasm.hap2_gfa
+    File? assembly_primary_fasta = gfa_to_fasta_primary.fasta
+    File? assembly_hap1_fasta    = gfa_to_fasta_hap1.fasta
+    File? assembly_hap2_fasta    = gfa_to_fasta_hap2.fasta
+    File? assembly_busco_primary = busco_primary.short_summary
+    File? assembly_busco_hap1    = busco_hap1.short_summary
+    File? assembly_busco_hap2    = busco_hap2.short_summary
+    File? assembly_merqury_qv    = merqury.qv_file
+    File? assembly_merqury_stats = merqury.completeness_stats
+
+    # assembly stats (0 when run_assembly = false)
+    String stat_assembly_primary_size  = select_first([gfa_to_fasta_primary.stat_assembly_size, "0"])
+    String stat_assembly_primary_ctgs  = select_first([gfa_to_fasta_primary.stat_contig_count,  "0"])
+    String stat_assembly_hap1_size     = select_first([gfa_to_fasta_hap1.stat_assembly_size,    "0"])
+    String stat_assembly_hap1_ctgs     = select_first([gfa_to_fasta_hap1.stat_contig_count,     "0"])
+    String stat_assembly_hap2_size     = select_first([gfa_to_fasta_hap2.stat_assembly_size,    "0"])
+    String stat_assembly_hap2_ctgs     = select_first([gfa_to_fasta_hap2.stat_contig_count,     "0"])
+    String stat_busco_primary_complete = select_first([busco_primary.stat_complete,             "0"])
+    String stat_busco_primary_single   = select_first([busco_primary.stat_single,               "0"])
+    String stat_busco_primary_missing  = select_first([busco_primary.stat_missing,              "0"])
+    String stat_merqury_qv             = select_first([merqury.stat_qv,                         "0"])
+    String stat_merqury_completeness   = select_first([merqury.stat_completeness,               "0"])
+
+    # assembly-to-reference outputs (only present when run_assembly = true)
+    File? assembly_minimap2_hap1_paf  = minimap2_hap1.paf
+    File? assembly_minimap2_hap2_paf  = minimap2_hap2.paf
+    File? assembly_syri_hap1_out      = syri_hap1.syri_out
+    File? assembly_syri_hap1_summary  = syri_hap1.syri_summary
+    File? assembly_syri_hap2_out      = syri_hap2.syri_out
+    File? assembly_syri_hap2_summary  = syri_hap2.syri_summary
+    File? assembly_quast_report       = quast.report_tsv
+    File? assembly_quast_html         = quast.report_html
+
+    # assembly-to-reference stats (0 when run_assembly = false)
+    String stat_quast_n50              = select_first([quast.stat_n50,             "0"])
+    String stat_quast_ng50             = select_first([quast.stat_ng50,            "0"])
+    String stat_quast_misassemblies    = select_first([quast.stat_misassemblies,   "0"])
+    String stat_quast_genome_fraction  = select_first([quast.stat_genome_fraction, "0"])
+    String stat_syri_hap1_inv          = select_first([syri_hap1.stat_inv_count,   "0"])
+    String stat_syri_hap1_trans        = select_first([syri_hap1.stat_trans_count, "0"])
+    String stat_syri_hap1_dup          = select_first([syri_hap1.stat_dup_count,   "0"])
+    String stat_syri_hap2_inv          = select_first([syri_hap2.stat_inv_count,   "0"])
+    String stat_syri_hap2_trans        = select_first([syri_hap2.stat_trans_count, "0"])
+    String stat_syri_hap2_dup          = select_first([syri_hap2.stat_dup_count,   "0"])
 
     # qc messages
     Array[String] msg = flatten(

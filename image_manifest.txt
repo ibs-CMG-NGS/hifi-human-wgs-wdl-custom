@@ -17,3 +17,9 @@ quay.io/pacbio/wgs_tertiary@sha256:410597030e0c85cf16eb27a877d260e7e2824747f5e8b
 google/deepvariant:1.9.0
 google/deepvariant:1.9.0-gpu
 pgkb/pharmcat:2.15.4
+quay.io/biocontainers/hifiasm:0.19.5--h5b5514e_1
+quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1
+quay.io/biocontainers/merqury:1.3--hdfd78af_4
+quay.io/biocontainers/minimap2:2.30--h577a1d6_0
+quay.io/biocontainers/syri:1.7.1--py311hcf77733_1
+quay.io/biocontainers/quast:5.3.0--py313pl5321h5ca1c30_2

@@ -40,6 +40,7 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 
 | 문서 | 내용 |
 |------|------|
+| [docs/assembly.md](./docs/assembly.md) | De novo assembly (hifiasm + BUSCO + Merqury + SyRI + QUAST) |
 | [docs/deepvariant.md](./docs/deepvariant.md) | DeepVariant 설정 |
 | [docs/pbmm2.md](./docs/pbmm2.md) | pbmm2 정렬 옵션 |
 | [docs/trgt.md](./docs/trgt.md) | TRGT 탠덤반복 genotyping |
@@ -78,7 +79,15 @@ pbmm2 (정렬)
   → pb-cpg-tools + MethBat (메틸화)
   → PBstarPhase + PharmCAT (약물유전체, human only)
   → [선택] Tertiary 분석 (slivar + svpack)
+
+[선택, run_assembly=true]
+  → hifiasm (de novo assembly)
+  → BUSCO + Merqury (assembly QC)
+  → minimap2 + SyRI (assembly-to-reference 구조변이)
+  → QUAST (reference 대비 assembly 품질)
 ```
+
+> De novo assembly는 `run_assembly=true` 플래그로 활성화. 기본값 `false`. → [상세 가이드](./docs/assembly.md)
 
 ## 레퍼런스 데이터
 
