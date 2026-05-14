@@ -168,10 +168,18 @@ workflow humanwgs_singleton {
   }
 
   if (run_assembly) {
+    scatter (bam in hifi_reads) {
+      call Hifiasm.bam_to_fastq {
+        input:
+          bam                = bam,
+          runtime_attributes = default_runtime_attributes
+      }
+    }
+
     call Hifiasm.hifiasm {
       input:
         sample_id          = sample_id,
-        hifi_reads         = hifi_reads,
+        hifi_reads         = bam_to_fastq.fastq,
         out_prefix         = sample_id + ".hifiasm",
         runtime_attributes = default_runtime_attributes
     }

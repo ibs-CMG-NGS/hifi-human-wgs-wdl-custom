@@ -5,10 +5,13 @@
 
 set -o pipefail
 
+source /home/ygkim/program/anaconda3/etc/profile.d/conda.sh
+conda activate hifi-human-wgs
+
 WORK_DIR="/data_4tb/hifi-human-wgs-wdl-custom"
 INPUT="TG6283.assembly.inputs.json"
-OUTPUT_DIR="/media/ygkim/e847f448-7179-490b-89b1-19eb760a361e/tg-integration-analysis/TG6283"
-LOG_FILE="/media/ygkim/e847f448-7179-490b-89b1-19eb760a361e/tg-integration-analysis/TG6283.assembly.log"
+OUTPUT_DIR="/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6283_B01"
+LOG_FILE="/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6283_B01.assembly.log"
 
 echo "========================================"
 echo "TG6283 de novo assembly 분석"

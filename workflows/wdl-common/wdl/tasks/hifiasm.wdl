@@ -47,7 +47,7 @@ task hifiasm {
   }
 
   runtime {
-    docker:                "quay.io/biocontainers/hifiasm:0.19.5--h5b5514e_1"
+    docker:                "quay.io/biocontainers/hifiasm:0.25.0--h5ca1c30_0"
     cpu:                   threads
     memory:                mem_gb + " GiB"
     disk:                  disk_size + " GB"
@@ -104,6 +104,50 @@ task gfa_to_fasta {
 
   runtime {
     docker:                "quay.io/biocontainers/hifiasm:0.19.5--h5b5514e_1"
+    cpu:                   threads
+    memory:                mem_gb + " GiB"
+    disk:                  disk_size + " GB"
+    disks:                 "local-disk " + disk_size + " HDD"
+    preemptible:           runtime_attributes.preemptible_tries
+    maxRetries:            runtime_attributes.max_retries
+    awsBatchRetryAttempts: runtime_attributes.max_retries  # !UnknownRuntimeKey
+    zones:                 runtime_attributes.zones
+    cpuPlatform:           runtime_attributes.cpuPlatform
+  }
+}
+
+task bam_to_fastq {
+  meta {
+    description: "Convert lima-demultiplexed HiFi BAM to FASTQ for hifiasm compatibility"
+  }
+
+  parameter_meta {
+    bam:                { name: "HiFi reads BAM (lima-demultiplexed)" }
+    runtime_attributes: { name: "Runtime attribute structure" }
+    fastq:              { name: "Output FASTQ file" }
+  }
+
+  input {
+    File               bam
+    RuntimeAttributes  runtime_attributes
+  }
+
+  Int threads   = 8
+  Int mem_gb    = 8
+  Int disk_size = ceil(size(bam, "GB") * 3 + 10)
+  String fastq_name = basename(bam, ".bam") + ".fastq"
+
+  command <<<
+    set -euo pipefail
+    samtools fastq -@ ~{threads} ~{bam} > ~{fastq_name}
+  >>>
+
+  output {
+    File fastq = fastq_name
+  }
+
+  runtime {
+    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
     cpu:                   threads
     memory:                mem_gb + " GiB"
     disk:                  disk_size + " GB"
