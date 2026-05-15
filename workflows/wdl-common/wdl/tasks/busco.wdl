@@ -43,13 +43,15 @@ task busco {
       -o busco_out \
       -l ~{lineage} \
       -c ~{threads} \
+      -f \
       --offline 2>/dev/null || \
     busco \
       -m genome \
       -i ~{assembly_fasta} \
       -o busco_out \
       -l ~{lineage} \
-      -c ~{threads}
+      -c ~{threads} \
+      -f
 
     cp busco_out/short_summary*.txt ~{out_prefix}.busco.short_summary.txt
 
