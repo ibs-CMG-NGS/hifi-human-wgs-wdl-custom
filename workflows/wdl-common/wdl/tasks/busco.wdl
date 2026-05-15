@@ -37,6 +37,8 @@ task busco {
 
     busco --version
 
+    # BUSCO 5.7.1 has a float32 JSON serialization bug that causes exit 1
+    # even when analysis completes. Ignore exit code and check for the summary file.
     busco \
       -m genome \
       -i ~{assembly_fasta} \
@@ -45,9 +47,15 @@ task busco {
       -c ~{threads} \
       -f \
       --offline \
-      --download_path /busco_downloads
+      --download_path /busco_downloads || true
 
-    cp busco_out/short_summary*.txt ~{out_prefix}.busco.short_summary.txt
+    summary=$(find busco_out -name "short_summary*.txt" | head -1)
+    if [ -z "$summary" ]; then
+      echo "BUSCO analysis failed: no short_summary.txt found" >&2
+      exit 1
+    fi
+
+    cp "$summary" ~{out_prefix}.busco.short_summary.txt
 
     python3 << 'EOF'
     import re
