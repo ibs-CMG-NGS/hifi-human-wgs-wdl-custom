@@ -96,7 +96,7 @@ task merqury {
     tar -xzf ~{meryl_db}
     DB_NAME=$(basename ~{meryl_db} .tar.gz)
 
-    merqury.sh "${DB_NAME}" ~{hap1_fasta} ~{hap2_fasta} ~{out_prefix}
+    MERQURY=/usr/local/share/merqury merqury.sh "${DB_NAME}" ~{hap1_fasta} ~{hap2_fasta} ~{out_prefix}
 
     mv ~{out_prefix}.qv ~{out_prefix}.merqury.qv 2>/dev/null || true
     mv ~{out_prefix}.completeness.stats ~{out_prefix}.merqury.completeness.stats 2>/dev/null || true
