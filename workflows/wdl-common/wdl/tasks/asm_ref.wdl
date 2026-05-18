@@ -35,6 +35,7 @@ task minimap2_asm_to_ref {
     minimap2 \
       -cx asm5 \
       --cs \
+      --eqx \
       -t ~{threads} \
       ~{ref_fasta} \
       ~{assembly_fasta} \
