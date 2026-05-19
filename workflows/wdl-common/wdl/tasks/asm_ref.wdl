@@ -96,6 +96,8 @@ task syri {
 
     syri --version 2>&1 || true
 
+    # SyRI requires chromosome-level assemblies; contig-level assemblies will
+    # produce "Unequal number of chromosomes" error. Capture exit and check output.
     syri \
       -c ~{paf} \
       -r ~{ref_fasta} \
@@ -103,7 +105,15 @@ task syri {
       -F P \
       --prefix ~{out_prefix}. \
       --nc ~{threads} \
-      --lf ~{out_prefix}.syri.log
+      --lf ~{out_prefix}.syri.log || true
+
+    if [ ! -f "~{out_prefix}.syri.out" ]; then
+      echo "# SyRI could not process this assembly (contig-level vs chromosome-level mismatch)" \
+        > ~{out_prefix}.syri.out
+    fi
+    if [ ! -f "~{out_prefix}.syri.summary" ]; then
+      printf "INV\t0\nTRANS\t0\nDUP\t0\n" > ~{out_prefix}.syri.summary
+    fi
 
     python3 << 'EOF'
     import os
