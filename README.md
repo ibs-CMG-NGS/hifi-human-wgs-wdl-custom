@@ -28,6 +28,12 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 | [docs/singleton.md](./docs/singleton.md) | singleton.wdl 전체 입력/출력 파라미터 및 DAG |
 | [docs/family.md](./docs/family.md) | family.wdl 전체 입력/출력 파라미터 및 DAG |
 
+**Transgene Integration 분석**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/transgene_integration.md](./docs/transgene_integration.md) | 트랜스진 삽입 위치 분석 파이프라인 — 입력/출력, 실행 방법, 샘플별 설정 |
+
 **파일 포맷 명세**
 
 | 문서 | 내용 |
@@ -61,10 +67,11 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 
 ## 워크플로우 구성
 
-두 가지 진입점:
+세 가지 진입점:
 
 - `workflows/singleton.wdl` — 단일 샘플 분석
 - `workflows/family.wdl` — 가족/다중 샘플 joint calling
+- `workflows/transgene_integration.wdl` — 트랜스진 삽입 위치 분석
 
 ### 분석 단계 (Singleton 기준)
 
@@ -130,6 +137,15 @@ miniwdl run workflows/singleton.wdl \
 ```
 
 > `--dir`을 동일하게 지정하면 call cache가 reference-based tasks를 스킵하고 assembly tasks만 실행합니다.
+
+**Transgene integration 분석**
+
+```bash
+bash run_tg_integration.sh {SAMPLE_ID} {SAMPLE}.tg_integration.inputs.json \
+  /mnt/JJ_dis_8tb/tg-integration-denovo-assembly/{SAMPLE}_integration_analysis
+```
+
+> de novo assembly 완료 후 실행. haplotagged_bam 제공 시 hybrid reference 정밀 분석 및 유전자 어노테이션까지 자동 수행. → [상세 가이드](./docs/transgene_integration.md)
 
 ---
 
