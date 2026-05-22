@@ -124,6 +124,7 @@ workflow transgene_integration {
 
     # 리포트
     File   report_txt           = integration_report.report_txt
+    File   report_html          = integration_report.report_html
     File   integration_tsv      = integration_report.integration_tsv
 
     # 요약 통계
