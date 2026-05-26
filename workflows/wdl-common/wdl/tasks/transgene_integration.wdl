@@ -579,7 +579,7 @@ PYEOF
   }
 
   runtime {
-    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+    docker:                "quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1"
     cpu:                   2
     memory:                "8 GiB"
     disk:                  "10 GB"
@@ -749,7 +749,7 @@ PYEOF
   }
 
   runtime {
-    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+    docker:                "quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1"
     cpu:                   2
     memory:                "4 GiB"
     disk:                  "10 GB"
@@ -1276,7 +1276,7 @@ PYEOF
   }
 
   runtime {
-    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+    docker:                "quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1"
     cpu:                   threads
     memory:                mem_gb + " GiB"
     disk:                  disk_size + " GB"
