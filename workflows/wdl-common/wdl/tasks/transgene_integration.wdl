@@ -355,7 +355,7 @@ task extract_region_reads {
 
     CENTER=~{integration_pos}
     WINDOW=~{window_bp}
-    START=$(python3 -c "print(max(0, ${CENTER} - ${WINDOW}))")
+    START=$(( CENTER > WINDOW ? CENTER - WINDOW : 0 ))
     END=$(( CENTER + WINDOW ))
     REGION="~{integration_chr}:${START}-${END}"
     echo "Extracting reads from: $REGION"
