@@ -210,14 +210,30 @@ task extract_integration_coords {
 
     for PAF in "~{hap1_ref_paf}" "~{hap2_ref_paf}"; do
       if [ -s "$PAF" ]; then
-        # 첫 번째 유효 정렬 블록에서 chr 및 중간 위치 추출
-        awk -v min=~{min_match_bp} '
-          $10 >= min {
-            print $6 > "integration_chr.txt"
-            print int(($8+$9)/2) > "integration_pos.txt"
-            exit
-          }' "$PAF"
-        # 유효한 행을 찾았으면 중단
+        # PAF 블록을 qname, qstart 순으로 정렬한 뒤
+        # 인접 블록 사이의 query gap이 TG insert 크기(500~50000 bp)인 지점을 찾는다.
+        # 그 gap 직전 블록의 reference 좌표가 실제 삽입 위치.
+        #   minus strand 블록: qend 위치는 ref tstart에 해당
+        #   plus  strand 블록: qend 위치는 ref tend에 해당
+        sort -k1,1 -k3,3n "$PAF" | awk -v min_gap=~{min_match_bp} '
+          prev_qname != "" && $1 == prev_qname {
+            gap = $3 - prev_qend
+            if (gap >= min_gap && gap <= 50000) {
+              if (prev_strand == "-") {
+                chr = prev_tname; pos = prev_tstart
+              } else {
+                chr = prev_tname; pos = prev_tend
+              }
+              print chr > "integration_chr.txt"
+              print pos > "integration_pos.txt"
+              exit
+            }
+          }
+          {
+            prev_qname=$1; prev_qend=$4
+            prev_tname=$6; prev_tstart=$8; prev_tend=$9; prev_strand=$5
+          }
+        ' -
         CHR=$(cat integration_chr.txt)
         if [ "$CHR" != "unknown" ]; then break; fi
       fi
