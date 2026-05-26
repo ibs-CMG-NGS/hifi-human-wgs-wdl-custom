@@ -1,0 +1,13 @@
+{
+  "humanwgs_singleton.sample_id": "TG-6425",
+  "humanwgs_singleton.hifi_reads": [
+    "/mnt/Ext_1tb_B/r84285_20260219_052427/1_C01/hifi_reads/m84285_260219_093939_s3.hifi_reads.bc2026.bam"
+  ],
+  "humanwgs_singleton.ref_map_file": "/data_4tb/hifi-human-wgs-wdl-custom/GRCm39.ref_map.tsv",
+  "humanwgs_singleton.backend": "HPC",
+  "humanwgs_singleton.preemptible": false,
+  "humanwgs_singleton.gpu": true,
+  "humanwgs_singleton.run_pgx": false,
+  "humanwgs_singleton.run_assembly": true,
+  "humanwgs_singleton.busco_lineage": "mammalia_odb10"
+}

@@ -1,0 +1,28 @@
+{
+  "transgene_integration.sample_id":       "TG-6425",
+  "transgene_integration.transgene_name":  "Aldh1l1_EGFP",
+  "transgene_integration.transgene_fasta": "/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG FA files/Aldh1l1-EGFP_TG-6425.fa",
+  "transgene_integration.hap1_fasta":      "/mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01/_LAST/out/assembly_hap1_fasta/TG-6425.hifiasm.bp.hap1.p_ctg.fa",
+  "transgene_integration.hap2_fasta":      "/mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01/_LAST/out/assembly_hap2_fasta/TG-6425.hifiasm.bp.hap2.p_ctg.fa",
+  "transgene_integration.ref_fasta":       "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/mouse_GRCm39.fasta",
+  "transgene_integration.min_match_bp":    500,
+
+  "transgene_integration.haplotagged_bam": "/mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01/_LAST/out/merged_haplotagged_bam/TG-6425.GRCm39.haplotagged.bam",
+  "transgene_integration.haplotagged_bai": "/mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01/_LAST/out/merged_haplotagged_bam/TG-6425.GRCm39.haplotagged.bam.bai",
+  "transgene_integration.extract_window_bp": 300000,
+
+  "transgene_integration.annotation_gtf_bgz": "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/gencode.vM36.annotation.sorted.gtf.bgz",
+  "transgene_integration.annotation_gtf_tbi": "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/gencode.vM36.annotation.sorted.gtf.bgz.tbi",
+  "transgene_integration.annotation_window_bp": 200000,
+
+  "transgene_integration.default_runtime_attributes": {
+    "backend":            "HPC",
+    "preemptible_tries":  0,
+    "max_retries":        2,
+    "zones":              "",
+    "cpuPlatform":        "",
+    "gpuType":            "",
+    "container_registry": "quay.io/biocontainers",
+    "container_namespace": null
+  }
+}
