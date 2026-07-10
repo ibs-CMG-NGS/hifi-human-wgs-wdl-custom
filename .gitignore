@@ -71,6 +71,9 @@ cromwell-workflow-logs/
 execution/
 call-*/
 
+# Local run outputs (nohup logs, per-sample result dirs -- can reach 1TB+)
+output/
+
 # Python cache
 __pycache__/
 *.pyc
