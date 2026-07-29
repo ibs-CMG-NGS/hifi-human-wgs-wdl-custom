@@ -225,11 +225,6 @@ task deepvariant_make_examples {
       /opt/deepvariant/bin/make_examples \
         --checkpoint /opt/models/pacbio \
         --norealign_reads \
-        --call_small_model_examples \
-        --small_model_indel_gq_threshold "30" \
-        --small_model_snp_gq_threshold "25" \
-        --small_model_vaf_context_window_size "51" \
-        --trained_small_model_path "/opt/smallmodels/pacbio" \
         --trim_reads_for_pileup \
         --vsc_min_fraction_indels 0.12 \
         --pileup_image_width 147 \
@@ -240,6 +235,8 @@ task deepvariant_make_examples {
         --alt_aligned_pileup=diff_channels \
         --sort_by_haplotypes \
         --parse_sam_aux_fields \
+        --enable_methylation_calling \
+        --methylation_calling_threshold 0.5 \
         --min_mapping_quality=1 \
         --mode calling \
         --ref ~{ref_fasta} \
@@ -536,7 +533,6 @@ task deepvariant_postprocess_variants {
       --ref ~{ref_fasta} \
       --infile call_variants_output.tfrecord.gz \
       --outfile ~{sample_id}.~{ref_name}.small_variants.vcf.gz \
-      --small_model_cvo_records "example_tfrecords/make_examples_call_variant_outputs.tfrecord@~{total_deepvariant_tasks}.gz" \
       --nonvariant_site_tfrecord_path "nonvariant_site_tfrecords/gvcf.tfrecord@~{total_deepvariant_tasks}.gz" \
       --gvcf_outfile ~{sample_id}.~{ref_name}.small_variants.g.vcf.gz
 

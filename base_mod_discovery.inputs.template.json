@@ -1,0 +1,56 @@
+{
+  "base_modification_discovery.experiment_id": "EXPERIMENT_ID_HERE",
+
+  "base_modification_discovery.control_bams": [
+    "/mnt/REPLACE/control_rep1.hifi_reads.bam",
+    "/mnt/REPLACE/control_rep2.hifi_reads.bam",
+    "/mnt/REPLACE/control_rep3.hifi_reads.bam"
+  ],
+  "base_modification_discovery.drug_a_bams": [
+    "/mnt/REPLACE/drug_a_rep1.hifi_reads.bam",
+    "/mnt/REPLACE/drug_a_rep2.hifi_reads.bam",
+    "/mnt/REPLACE/drug_a_rep3.hifi_reads.bam"
+  ],
+  "base_modification_discovery.drug_b_bams": [
+    "/mnt/REPLACE/drug_b_rep1.hifi_reads.bam",
+    "/mnt/REPLACE/drug_b_rep2.hifi_reads.bam",
+    "/mnt/REPLACE/drug_b_rep3.hifi_reads.bam"
+  ],
+  "base_modification_discovery.drug_ab_bams": [
+    "/mnt/REPLACE/drug_ab_rep1.hifi_reads.bam",
+    "/mnt/REPLACE/drug_ab_rep2.hifi_reads.bam",
+    "/mnt/REPLACE/drug_ab_rep3.hifi_reads.bam"
+  ],
+
+  "base_modification_discovery.control_ids":  ["control_1",  "control_2",  "control_3"],
+  "base_modification_discovery.drug_a_ids":   ["drug_a_1",   "drug_a_2",   "drug_a_3"],
+  "base_modification_discovery.drug_b_ids":   ["drug_b_1",   "drug_b_2",   "drug_b_3"],
+  "base_modification_discovery.drug_ab_ids":  ["drug_ab_1",  "drug_ab_2",  "drug_ab_3"],
+
+  "base_modification_discovery.ref_fasta": "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/mouse_GRCm39.fasta",
+  "base_modification_discovery.ref_fai":   "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/mouse_GRCm39.fasta.fai",
+
+  "base_modification_discovery.annotation_gtf_bgz": "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/gencode.vM36.annotation.sorted.gtf.bgz",
+  "base_modification_discovery.annotation_gtf_tbi": "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/gencode.vM36.annotation.sorted.gtf.bgz.tbi",
+  "base_modification_discovery.cpg_island_tsv":     "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39/cpgIslandExt.sorted.mm39.tsv",
+
+  "base_modification_discovery.min_ipd_ratio":        2.0,
+  "base_modification_discovery.min_mod_score":        30,
+  "base_modification_discovery.min_coverage":         25,
+  "base_modification_discovery.ipd_pvalue":           0.001,
+  "base_modification_discovery.extract_window_bp":    250,
+  "base_modification_discovery.annotation_window_bp": 2000,
+  "base_modification_discovery.min_cluster_size":     50,
+  "base_modification_discovery.run_hifimeth_qc":      false,
+
+  "base_modification_discovery.default_runtime_attributes": {
+    "backend":             "HPC",
+    "preemptible_tries":   0,
+    "max_retries":         2,
+    "zones":               "",
+    "cpuPlatform":         "",
+    "gpuType":             "",
+    "container_registry":  "quay.io/pacbio",
+    "container_namespace": null
+  }
+}

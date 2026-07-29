@@ -190,6 +190,8 @@ task extract_integration_coords {
   parameter_meta {
     hap1_ref_paf:       { name: "PAF: hap1 chimeric contigs vs reference" }
     hap2_ref_paf:       { name: "PAF: hap2 chimeric contigs vs reference" }
+    hap1_tg_paf:        { name: "PAF: transgene vs hap1 assembly" }
+    hap2_tg_paf:        { name: "PAF: transgene vs hap2 assembly" }
     min_match_bp:       { name: "Minimum matching bases to consider (default: 1000)" }
     runtime_attributes: { name: "Runtime attribute structure" }
     integration_chr:    { name: "Estimated integration chromosome" }
@@ -199,6 +201,8 @@ task extract_integration_coords {
   input {
     File   hap1_ref_paf
     File   hap2_ref_paf
+    File   hap1_tg_paf
+    File   hap2_tg_paf
     Int    min_match_bp = 1000
     RuntimeAttributes runtime_attributes
   }
@@ -208,32 +212,48 @@ task extract_integration_coords {
     echo "unknown" > integration_chr.txt
     echo "0"       > integration_pos.txt
 
-    for PAF in "~{hap1_ref_paf}" "~{hap2_ref_paf}"; do
-      if [ -s "$PAF" ]; then
-        # PAF 블록을 qname, qstart 순으로 정렬한 뒤
-        # 인접 블록 사이의 query gap이 TG insert 크기(500~50000 bp)인 지점을 찾는다.
-        # 그 gap 직전 블록의 reference 좌표가 실제 삽입 위치.
-        #   minus strand 블록: qend 위치는 ref tstart에 해당
-        #   plus  strand 블록: qend 위치는 ref tend에 해당
-        sort -k1,1 -k3,3n "$PAF" | awk -v min_gap=~{min_match_bp} '
-          prev_qname != "" && $1 == prev_qname {
-            gap = $3 - prev_qend
-            if (gap >= min_gap && gap <= 50000) {
-              if (prev_strand == "-") {
-                chr = prev_tname; pos = prev_tstart
-              } else {
-                chr = prev_tname; pos = prev_tend
-              }
-              print chr > "integration_chr.txt"
-              print pos > "integration_pos.txt"
-              exit
+    # TG vs assembly PAF에서 TG가 매핑된 contig 좌표 범위를 먼저 구한 뒤,
+    # ref PAF에서 그 직전 블록의 reference 좌표를 찾는다.
+    # (gap 기반 접근은 TG 카피 경계가 다른 chr에 매핑될 때 실패하므로 사용하지 않음)
+    for PAIR in "~{hap1_tg_paf}:~{hap1_ref_paf}" "~{hap2_tg_paf}:~{hap2_ref_paf}"; do
+      TG_PAF=$(echo "$PAIR" | cut -d: -f1)
+      REF_PAF=$(echo "$PAIR" | cut -d: -f2)
+
+      if [ -s "$TG_PAF" ] && [ -s "$REF_PAF" ]; then
+        # TG가 매핑된 contig 좌표: target(=$6) 기준 start(=$8)/end(=$9)
+        TG_CONTIG_START=$(awk '{print $8}' "$TG_PAF" | sort -n | head -1)
+        TG_CONTIG_END=$(awk '{print $9}' "$TG_PAF" | sort -n | tail -1)
+
+        # ref PAF에서 TG_CONTIG_START 이전에 끝나는 블록 중 가장 마지막 것 선택
+        # (mapq >= 1 조건으로 저품질 매핑 제외)
+        # 폴백: 해당 블록이 없으면 TG_CONTIG_START를 포함하는 블록에서 선형 보간
+        awk -v tg_start="$TG_CONTIG_START" '
+          $12 >= 1 && $4+0 <= tg_start+0 {
+            if ($4+0 > best_qend+0) {
+              best_qend = $4
+              if ($5 == "-") { best_chr = $6; best_pos = $8 }
+              else            { best_chr = $6; best_pos = $9 }
             }
           }
-          {
-            prev_qname=$1; prev_qend=$4
-            prev_tname=$6; prev_tstart=$8; prev_tend=$9; prev_strand=$5
+          $12 >= 1 && $3+0 <= tg_start+0 && $4+0 > tg_start+0 {
+            # TG가 이 블록 내부에 있음 — 선형 보간으로 ref 위치 추정
+            if (fb_chr == "") {
+              offset = tg_start - $3
+              if ($5 == "-") { fb_chr = $6; fb_pos = $9 - offset }
+              else            { fb_chr = $6; fb_pos = $8 + offset }
+            }
           }
-        ' -
+          END {
+            if (best_chr != "") {
+              print best_chr > "integration_chr.txt"
+              print best_pos > "integration_pos.txt"
+            } else if (fb_chr != "") {
+              print fb_chr > "integration_chr.txt"
+              print fb_pos > "integration_pos.txt"
+            }
+          }
+        ' "$REF_PAF"
+
         CHR=$(cat integration_chr.txt)
         if [ "$CHR" != "unknown" ]; then break; fi
       fi
@@ -409,7 +429,7 @@ task extract_region_reads {
 
 task align_to_hybrid_ref {
   meta {
-    description: "추출된 HiFi reads를 hybrid reference에 재정렬 (PAF 출력)"
+    description: "추출된 HiFi reads를 hybrid reference에 재정렬 (PAF + SAM 동시 출력)"
   }
 
   parameter_meta {
@@ -418,7 +438,8 @@ task align_to_hybrid_ref {
     region_reads_fq:    { name: "Region reads FASTQ.gz" }
     out_prefix:         { name: "Output prefix" }
     runtime_attributes: { name: "Runtime attribute structure" }
-    hybrid_paf:         { name: "PAF: region reads vs hybrid reference" }
+    hybrid_paf:         { name: "PAF: region reads vs hybrid reference (detect_chimeric_reads 입력용)" }
+    hybrid_sam:         { name: "SAM: region reads vs hybrid reference (BAM 변환 → IGV 시각화용)" }
   }
 
   input {
@@ -431,11 +452,14 @@ task align_to_hybrid_ref {
 
   Int threads   = 16
   Int mem_gb    = 24
-  Int disk_size = ceil(size(region_reads_fq, "GB") * 5 + size(hybrid_ref_fa, "GB") * 2 + 5)
+  # SAM이 PAF보다 크므로 디스크 여유 증가
+  Int disk_size = ceil(size(region_reads_fq, "GB") * 15 + size(hybrid_ref_fa, "GB") * 2 + 5)
 
   command <<<
     set -euo pipefail
     minimap2 --version
+
+    # PAF 출력 — detect_chimeric_reads 파서에서 직접 사용
     minimap2 \
       -cx map-hifi \
       --cs \
@@ -444,14 +468,77 @@ task align_to_hybrid_ref {
       ~{hybrid_ref_fa} \
       ~{region_reads_fq} \
       > ~{out_prefix}.hybrid_aligned.paf
+    echo "PAF alignments: $(wc -l < ~{out_prefix}.hybrid_aligned.paf)"
 
-    echo "Total alignments: $(wc -l < ~{out_prefix}.hybrid_aligned.paf)"
+    # SAM 출력 — sort_index_bam 태스크에서 sorted BAM+BAI로 변환 (IGV 용)
+    minimap2 \
+      -ax map-hifi \
+      --secondary=no \
+      -t ~{threads} \
+      ~{hybrid_ref_fa} \
+      ~{region_reads_fq} \
+      > ~{out_prefix}.hybrid_aligned.sam
+    echo "SAM records (non-header): $(grep -cv '^@' ~{out_prefix}.hybrid_aligned.sam || true)"
   >>>
 
-  output { File hybrid_paf = "~{out_prefix}.hybrid_aligned.paf" }
+  output {
+    File hybrid_paf = "~{out_prefix}.hybrid_aligned.paf"
+    File hybrid_sam = "~{out_prefix}.hybrid_aligned.sam"
+  }
 
   runtime {
     docker:                "quay.io/biocontainers/minimap2:2.30--h577a1d6_0"
+    cpu:                   threads
+    memory:                mem_gb + " GiB"
+    disk:                  disk_size + " GB"
+    disks:                 "local-disk " + disk_size + " HDD"
+    preemptible:           runtime_attributes.preemptible_tries
+    maxRetries:            runtime_attributes.max_retries
+    awsBatchRetryAttempts: runtime_attributes.max_retries  # !UnknownRuntimeKey
+    zones:                 runtime_attributes.zones
+    cpuPlatform:           runtime_attributes.cpuPlatform
+  }
+}
+
+# ── Step 5-3b ─────────────────────────────────────────────────────────────────
+
+task sort_index_bam {
+  meta {
+    description: "Hybrid reference 정렬 SAM → 정렬된 BAM + BAI 생성 (IGV 시각화용)"
+  }
+
+  parameter_meta {
+    in_sam:             { name: "Input SAM file (from align_to_hybrid_ref)" }
+    out_prefix:         { name: "Output prefix" }
+    runtime_attributes: { name: "Runtime attribute structure" }
+    bam:                { name: "Sorted BAM: region reads vs hybrid reference" }
+    bai:                { name: "BAM index (.bai)" }
+  }
+
+  input {
+    File   in_sam
+    String out_prefix
+    RuntimeAttributes runtime_attributes
+  }
+
+  Int threads   = 4
+  Int mem_gb    = 8
+  Int disk_size = ceil(size(in_sam, "GB") * 3 + 5)
+
+  command <<<
+    set -euo pipefail
+    samtools sort -@ ~{threads} -o ~{out_prefix}.hybrid_aligned.bam ~{in_sam}
+    samtools index ~{out_prefix}.hybrid_aligned.bam
+    echo "BAM total records: $(samtools view -c ~{out_prefix}.hybrid_aligned.bam)"
+  >>>
+
+  output {
+    File bam = "~{out_prefix}.hybrid_aligned.bam"
+    File bai = "~{out_prefix}.hybrid_aligned.bam.bai"
+  }
+
+  runtime {
+    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
     cpu:                   threads
     memory:                mem_gb + " GiB"
     disk:                  disk_size + " GB"
@@ -481,6 +568,7 @@ task detect_chimeric_reads {
     breakpoint_range:   { name: "Breakpoint position range (min-max)" }
     chimeric_count:     { name: "Number of chimeric reads supporting the breakpoint" }
     chimeric_tsv:       { name: "Per-read chimeric alignment details (TSV)" }
+    tg_strand:          { name: "TG strand relative to reference genome (+/-/N/A)" }
   }
 
   input {
@@ -538,9 +626,11 @@ print(f"Total chimeric reads: {len(chimeric)}")
 # tolerance: 인접 판정 허용 거리 (bp)
 TOLERANCE = 1000
 
-breakpoints = []
-host_chrs   = []
-tsv_rows    = ["read_name\thost_chr\thost_q_start\thost_q_end\thost_t_start\thost_t_end\ttg_q_start\ttg_q_end\tbreakpoint_pos\tjunction_type"]
+breakpoints     = []
+host_to_tg_bps  = []  # ha["t_end"]: host가 끝나고 TG가 시작되는 ref 좌표 = 삽입 경계
+tg_to_host_bps  = []  # ha["t_start"]: TG가 끝나고 host가 시작되는 ref 좌표
+host_chrs       = []
+tsv_rows        = ["read_name\thost_chr\thost_q_start\thost_q_end\thost_t_start\thost_t_end\ttg_q_start\ttg_q_end\tbreakpoint_pos\tjunction_type"]
 
 for c in chimeric:
     for ha in c["host_alns"]:
@@ -550,6 +640,7 @@ for c in chimeric:
                 bp = ha["t_end"]
                 jtype = "host->TG"
                 breakpoints.append(bp)
+                host_to_tg_bps.append(bp)
                 host_chrs.append(ha["target"])
                 tsv_rows.append(f'{c["name"]}\t{ha["target"]}\t{ha["q_start"]}\t{ha["q_end"]}\t{ha["t_start"]}\t{ha["t_end"]}\t{ta["q_start"]}\t{ta["q_end"]}\t{bp}\t{jtype}')
             # Case 2: TG 정렬 끝 ≈ host 정렬 시작 (read 상에서 TG→host 방향)
@@ -557,24 +648,35 @@ for c in chimeric:
                 bp = ha["t_start"]
                 jtype = "TG->host"
                 breakpoints.append(bp)
+                tg_to_host_bps.append(bp)
                 host_chrs.append(ha["target"])
                 tsv_rows.append(f'{c["name"]}\t{ha["target"]}\t{ha["q_start"]}\t{ha["q_end"]}\t{ha["t_start"]}\t{ha["t_end"]}\t{ta["q_start"]}\t{ta["q_end"]}\t{bp}\t{jtype}')
 
 bp_chr = max(set(host_chrs), key=host_chrs.count) if host_chrs else "unknown"
 
-if breakpoints:
-    bp_sorted  = sorted(breakpoints)
-    bp_median  = bp_sorted[len(bp_sorted) // 2]
-    bp_min     = min(breakpoints)
-    bp_max     = max(breakpoints)
-    bp_range   = f"{bp_chr}:{bp_min:,}-{bp_max:,}"
-    print(f"Breakpoint chromosome: {bp_chr}")
-    print(f"Breakpoint (median):   {bp_chr}:{bp_median:,}")
-    print(f"Breakpoint range:      {bp_range}")
-    print(f"Supporting reads:      {len(breakpoints)}")
+# host→TG reads = host 서열이 끝나고 TG 서열이 시작되는 지점 (삽입 경계 직접 지지)
+# TG→host reads = 삽입 내부 또는 반대 가닥 접합으로 breakpoint 추정에 사용하지 않음
+if host_to_tg_bps:
+    primary_bps = host_to_tg_bps
+    bp_support  = f"{len(host_to_tg_bps)} host->TG reads"
 else:
-    bp_median = 0
-    bp_range  = "N/A"
+    primary_bps = breakpoints
+    bp_support  = f"{len(breakpoints)} reads (no host->TG)"
+
+if primary_bps:
+    bp_sorted  = sorted(primary_bps)
+    bp_median  = bp_sorted[len(bp_sorted) // 2]
+    bp_min_all = min(breakpoints)
+    bp_max_all = max(breakpoints)
+    bp_range   = f"{bp_chr}:{bp_min_all:,}-{bp_max_all:,}"
+    print(f"Breakpoint chromosome: {bp_chr}")
+    print(f"Breakpoint position:   {bp_chr}:{bp_median:,} ({bp_support})")
+    print(f"Breakpoint range:      {bp_range}")
+    print(f"Total chimeric reads:  {len(chimeric)}")
+else:
+    bp_median  = 0
+    bp_range   = "N/A"
+    bp_support = "N/A"
     print("WARNING: No clear breakpoint detected from chimeric reads.")
 
 with open(f"{out_prefix}.chimeric_reads.tsv", "w") as f:
@@ -583,6 +685,29 @@ with open("breakpoint_chr.txt",   "w") as f: f.write(bp_chr)
 with open("breakpoint_pos.txt",   "w") as f: f.write(str(bp_median))
 with open("breakpoint_range.txt", "w") as f: f.write(bp_range)
 with open("chimeric_count.txt",   "w") as f: f.write(str(len(chimeric)))
+with open("bp_support.txt",       "w") as f: f.write(bp_support)
+
+# ── TG strand vs reference ────────────────────────────────────────────────
+# host_strand == tg_strand → 동일 방향 read 정렬 → TG는 ref 기준 정방향(+)
+# host_strand != tg_strand → 반대 방향 → TG는 ref 기준 역방향(-)
+tg_strand_votes = []
+for c in chimeric:
+    for ha in c["host_alns"]:
+        for ta in c["tg_alns"]:
+            if (abs(ha["q_end"] - ta["q_start"]) <= TOLERANCE or
+                abs(ta["q_end"] - ha["q_start"]) <= TOLERANCE):
+                tg_strand_votes.append("+" if ha["strand"] == ta["strand"] else "-")
+
+if tg_strand_votes:
+    plus  = tg_strand_votes.count("+")
+    minus = tg_strand_votes.count("-")
+    tg_strand = "+" if plus >= minus else "-"
+    print(f"TG strand vs reference: {tg_strand} ({plus}+/{minus}- from {len(tg_strand_votes)} junctions)")
+else:
+    tg_strand = "N/A"
+    print("TG strand vs reference: N/A (no chimeric junctions)")
+
+with open("tg_strand.txt", "w") as f: f.write(tg_strand)
 PYEOF
   >>>
 
@@ -592,6 +717,8 @@ PYEOF
     String breakpoint_pos   = read_string("breakpoint_pos.txt")
     String breakpoint_range = read_string("breakpoint_range.txt")
     String chimeric_count   = read_string("chimeric_count.txt")
+    String bp_support       = read_string("bp_support.txt")
+    String tg_strand        = read_string("tg_strand.txt")
   }
 
   runtime {
@@ -796,7 +923,9 @@ task integration_report {
     precise_breakpoint_chr: { name: "Precise breakpoint chromosome (from hybrid ref; 'N/A' if not run)" }
     precise_breakpoint_pos: { name: "Precise breakpoint position (from hybrid ref; '0' if not run)" }
     breakpoint_range:       { name: "Breakpoint position range string (from hybrid ref)" }
-    chimeric_count:         { name: "Number of chimeric reads supporting the breakpoint" }
+    chimeric_count:         { name: "Total number of chimeric reads detected" }
+    bp_support:             { name: "Breakpoint support string (e.g. '5 host->TG reads')" }
+    tg_strand_vs_ref:       { name: "TG strand relative to reference genome from hybrid ref chimeric reads (+/-/N/A)" }
     nearest_gene_name:      { name: "Gene at/near the breakpoint (from annotation; 'N/A' if not run)" }
     nearest_gene_type:      { name: "Biotype of nearest gene" }
     insertion_feature_type: { name: "exon / intron / intergenic" }
@@ -825,6 +954,8 @@ task integration_report {
     String precise_breakpoint_pos = "0"
     String breakpoint_range       = "N/A"
     String chimeric_count         = "0"
+    String bp_support             = "N/A"
+    String tg_strand_vs_ref       = "N/A"
 
     # 유전자 어노테이션 결과 (선택적 — 미실행 시 기본값)
     String nearest_gene_name      = "N/A"
@@ -858,7 +989,10 @@ prec_pos_str   = "~{precise_breakpoint_pos}"
 prec_pos       = int(prec_pos_str) if prec_pos_str.isdigit() and prec_pos_str != "0" else 0
 bp_range       = "~{breakpoint_range}"
 chimeric_n     = "~{chimeric_count}"
+bp_support     = "~{bp_support}"
 has_hybrid     = prec_chr != "N/A" and prec_pos > 0
+tg_strand_ref  = "~{tg_strand_vs_ref}"   # hybrid ref chimeric reads 기반 TG 절대 방향
+has_tg_strand  = tg_strand_ref not in ("N/A", "?")
 
 # 어노테이션 결과
 gene_name      = "~{nearest_gene_name}"
@@ -895,10 +1029,22 @@ def parse_ref_paf(paf_file, min_match=1000):
             p = line.strip().split('\t')
             if len(p) < 12 or int(p[9]) < min_match:
                 continue
+            # de:f: tag = divergence → identity = (1 - de) * 100
+            de = 0.0
+            for tag in p[12:]:
+                if tag.startswith("de:f:"):
+                    try: de = float(tag.split(":")[2])
+                    except: pass
+                    break
+            q_start, q_end = int(p[2]), int(p[3])
+            t_start, t_end = int(p[7]), int(p[8])
             alns[p[0]].append({
-                "q_len": int(p[1]), "q_start": int(p[2]), "q_end": int(p[3]),
-                "chrom": p[5], "t_start": int(p[7]), "t_end": int(p[8]),
+                "q_len": int(p[1]), "q_start": q_start, "q_end": q_end,
+                "chrom": p[5], "t_start": t_start, "t_end": t_end,
                 "strand": p[4], "matches": int(p[9]), "mapq": int(p[11]),
+                "identity": round((1.0 - de) * 100, 2),
+                "aln_len":  q_end - q_start,
+                "ref_span": t_end - t_start,
             })
     return alns
 
@@ -906,8 +1052,8 @@ def estimate_ref_pos(tg_center, ref_alns):
     for a in sorted(ref_alns, key=lambda x: x["q_start"]):
         if a["q_start"] <= tg_center <= a["q_end"]:
             ratio = (tg_center - a["q_start"]) / max(1, a["q_end"] - a["q_start"])
-            return a["chrom"], int(a["t_start"] + ratio * (a["t_end"] - a["t_start"])), a["mapq"]
-    return "unknown", 0, 0
+            return a["chrom"], int(a["t_start"] + ratio * (a["t_end"] - a["t_start"])), a["mapq"], a["strand"]
+    return "unknown", 0, 0, "?"
 
 hap_data        = {}
 integration_chr = "unknown"
@@ -926,10 +1072,22 @@ for hap, tg_paf, ref_paf in [
         enriched = []
         for cp in copies_s:
             center = (cp["c_start"] + cp["c_end"]) // 2
-            chrom, ref_pos, ref_mapq = estimate_ref_pos(center, ref_aln)
+            chrom, ref_pos, ref_mapq, contig_ref_strand = estimate_ref_pos(center, ref_aln)
             tg_cov = (cp["tg_end"] - cp["tg_start"]) / cp["tg_len"] * 100
+            # ── 교정된 TG strand (genome 기준) ──────────────────────────────
+            # 우선순위 1: mapq>0 contig → contig 방향 이용해 TG 절대 방향 계산
+            # 우선순위 2: hybrid ref chimeric reads 결과
+            # 우선순위 3: 불명확
+            if ref_mapq > 0 and contig_ref_strand != "?":
+                corrected_strand = "+" if contig_ref_strand == cp["strand"] else "-"
+            elif has_tg_strand:
+                corrected_strand = tg_strand_ref
+            else:
+                corrected_strand = "?"
             enriched.append({**cp, "chrom": chrom, "ref_pos": ref_pos,
-                              "ref_mapq": ref_mapq, "tg_cov": tg_cov})
+                              "ref_mapq": ref_mapq, "tg_cov": tg_cov,
+                              "corrected_strand": corrected_strand,
+                              "contig_ref_strand": contig_ref_strand})
         gaps = [enriched[i+1]["c_start"] - enriched[i]["c_end"]
                 for i in range(len(enriched)-1)]
         contigs.append({
@@ -958,9 +1116,9 @@ lines.append("=" * 70)
 if has_hybrid:
     lines.append(f"\n[PRECISE BREAKPOINT — hybrid reference analysis]")
     lines.append(f"  Chromosome: {prec_chr}")
-    lines.append(f"  Position:   {prec_pos:,} bp (±4 bp)")
+    lines.append(f"  Position:   {prec_pos:,} bp")
+    lines.append(f"  Support:    {bp_support} / {chimeric_n} total chimeric reads")
     lines.append(f"  Range:      {bp_range}")
-    lines.append(f"  Support:    {chimeric_n} chimeric reads")
 if has_annot:
     lines.append(f"\n[GENE ANNOTATION — Gencode]")
     lines.append(f"  Gene:       {gene_name} ({gene_type})")
@@ -1004,13 +1162,18 @@ for hap in ["hap1", "hap2"]:
             lines.append(f"\n    Copy {i}:")
             lines.append(f"      Contig pos:   {cp['c_start']:,} - {cp['c_end']:,}")
             lines.append(f"      TG coverage:  {cp['tg_start']}-{cp['tg_end']}/{cp['tg_len']} ({cp['tg_cov']:.1f}%)")
-            lines.append(f"      Direction:    {cp['strand']} ({'역방향' if cp['strand']=='-' else '정방향'})")
+            cs = cp["corrected_strand"]
+            cs_lbl = {"+" : "정방향", "-": "역방향"}.get(cs, "불명확")
+            raw_s  = cp["strand"]
+            raw_lbl = "역방향" if raw_s == "-" else "정방향"
+            strand_note = "" if cs == raw_s else f" (de novo contig 기준: {raw_s} {raw_lbl})"
+            lines.append(f"      Direction:    {cs} ({cs_lbl}){strand_note}  ← genome 기준")
             lines.append(f"      Ref position: {cp['chrom']}:{cp['ref_pos']:,} (mapq={cp['ref_mapq']})")
             tsv_rows.append("\t".join([
                 sample_id, transgene_name, hap, c["name"],
                 str(c["contig_len"]), str(copy_num), str(i),
                 str(cp["c_start"]), str(cp["c_end"]),
-                f"{cp['tg_cov']:.1f}", cp["strand"],
+                f"{cp['tg_cov']:.1f}", cp["corrected_strand"],
                 cp["chrom"], str(cp["ref_pos"]), str(cp["ref_mapq"]),
                 gap_bp,
             ]))
@@ -1043,9 +1206,43 @@ def pct_bar(v, color="#4CAF50"):
             f'<div style="background:{color};width:{min(v,100):.1f}%;height:100%;border-radius:4px"></div></div>'
             f' <span style="font-size:0.83em;color:#555">{v:.1f}%</span>')
 
-def strand_badge(s):
-    c,lbl = ("#e74c3c","&#8722; 역방향") if s=="-" else ("#27ae60","+ 정방향")
-    return f'<span style="background:{c};color:#fff;padding:1px 7px;border-radius:10px;font-size:0.79em">{lbl}</span>'
+def strand_badge(s, source=""):
+    if s == "-":   c, lbl = "#e74c3c", "&#8722; 역방향"
+    elif s == "+": c, lbl = "#27ae60", "+ 정방향"
+    else:          c, lbl = "#999",    "? 불명확"
+    badge = f'<span style="background:{c};color:#fff;padding:1px 7px;border-radius:10px;font-size:0.79em">{lbl}</span>'
+    if source:
+        badge += f' <span style="font-size:0.74em;color:#888">{source}</span>'
+    return badge
+
+def bp_fmt(n):
+    if n >= 1_000_000: return f"{n/1_000_000:.2f} Mb"
+    if n >= 1_000:     return f"{n/1_000:.1f} kb"
+    return f"{n} bp"
+
+def collinearity_class(alns):
+    """블록 순서 분석: 각 블록에 색상 힌트 부여."""
+    if not alns: return []
+    sorted_alns = sorted(enumerate(alns), key=lambda x: x[1]["q_start"])
+    hints = [""] * len(alns)
+    prev_chrom, prev_t_end, prev_strand = None, None, None
+    for rank, (orig_idx, a) in enumerate(sorted_alns):
+        chrom = a["chrom"]; strand = a["strand"]
+        if prev_chrom is None:
+            hints[orig_idx] = "syntenic"
+        elif chrom != prev_chrom:
+            hints[orig_idx] = "transloc"
+        elif strand != prev_strand:
+            hints[orig_idx] = "inversion"
+        elif (strand == "+" and a["t_start"] < prev_t_end) or \
+             (strand == "-" and a["t_end"]   > prev_t_end):
+            hints[orig_idx] = "overlap"
+        else:
+            hints[orig_idx] = "syntenic"
+        prev_chrom = chrom
+        prev_t_end = a["t_end"] if strand == "+" else a["t_start"]
+        prev_strand = strand
+    return hints
 
 def make_contig_svg(contig_len, copies):
     W, H, scale = 640, 52, 640/contig_len
@@ -1070,27 +1267,69 @@ def build_hap_html(hap, contigs):
     blocks=[]
     for c in contigs:
         copies,gaps,ref_alns=c["copies"],c["gaps"],c["ref_alns"]
+        hints = collinearity_class(ref_alns)
+        hint_bg = {"syntenic":"#f0fff0","inversion":"#fff0f0","transloc":"#fffbe6","overlap":"#f0f0ff","":""}
+        hint_icon = {"syntenic":"","inversion":"&#8635; ","transloc":"&#8646; ","overlap":"&#8651; ","":""}
+        hint_tip  = {"syntenic":"Syntenic (공선성)","inversion":"Inversion (역위)","transloc":"Translocation (전좌)","overlap":"Overlap/Inversion (중복/역위)","":""}
         copy_rows=""
         for i,cp in enumerate(copies,1):
+            cs = cp["corrected_strand"]
+            raw_s = cp["strand"]
+            src = ""
+            if cp["ref_mapq"] > 0 and cp["contig_ref_strand"] != "?":
+                src = "contig→ref"
+            elif has_tg_strand:
+                src = "hybrid ref"
+            mismatch_warn = ""
+            if cs != "?" and cs != raw_s:
+                mismatch_warn = f' <span title="de novo contig 방향({raw_s})과 다름" style="color:#e67e22;font-size:0.75em">&#9888;</span>'
             copy_rows+=(
                 f'<tr><td style="text-align:center;font-weight:600">{i}</td>'
                 f'<td style="font-family:monospace;white-space:nowrap">{cp["c_start"]:,}&#8211;{cp["c_end"]:,}</td>'
-                f'<td>{pct_bar(cp["tg_cov"])}</td><td>{strand_badge(cp["strand"])}</td>'
+                f'<td>{pct_bar(cp["tg_cov"])}</td>'
+                f'<td>{strand_badge(cs, src)}{mismatch_warn}</td>'
                 f'<td style="font-family:monospace">{cp["chrom"]}:{cp["ref_pos"]:,}</td>'
                 f'<td style="text-align:center">{cp["ref_mapq"]}</td></tr>'
             )
             if i<=len(gaps):
                 copy_rows+=f'<tr><td colspan="6" style="text-align:center;color:#888;font-size:0.82em;padding:1px">&#8595; gap {gaps[i-1]:,} bp</td></tr>'
-        ref_rows="".join(
-            f'<tr><td style="font-family:monospace;white-space:nowrap">{a["chrom"]}:{a["t_start"]:,}&#8211;{a["t_end"]:,}</td>'
-            f'<td style="font-family:monospace;white-space:nowrap">{a["q_start"]:,}&#8211;{a["q_end"]:,}</td>'
-            f'<td style="text-align:center">{a["strand"]}</td><td style="text-align:center">{a["mapq"]}</td></tr>'
-            for a in ref_alns
-        )
+        ref_rows=""
+        for idx,a in enumerate(ref_alns):
+            h = hints[idx] if idx < len(hints) else ""
+            bg = hint_bg.get(h,"")
+            icon = hint_icon.get(h,"")
+            tip  = hint_tip.get(h,"")
+            ref_span_fmt = bp_fmt(a["ref_span"])
+            aln_len_fmt  = bp_fmt(a["aln_len"])
+            ident_str    = f'{a["identity"]:.2f}%' if "identity" in a else "N/A"
+            ref_rows+=(
+                f'<tr style="background:{bg}" title="{tip}">'
+                f'<td style="font-family:monospace;white-space:nowrap;font-size:0.82em">{icon}{a["chrom"]}:{a["t_start"]:,}&#8211;{a["t_end"]:,}</td>'
+                f'<td style="font-family:monospace;white-space:nowrap;font-size:0.82em">{a["q_start"]:,}&#8211;{a["q_end"]:,}</td>'
+                f'<td style="text-align:center">{a["strand"]}</td>'
+                f'<td style="text-align:right;font-family:monospace;font-size:0.82em">{ref_span_fmt}</td>'
+                f'<td style="text-align:right;font-family:monospace;font-size:0.82em">{aln_len_fmt}</td>'
+                f'<td style="text-align:right;font-size:0.82em">{ident_str}</td>'
+                f'<td style="text-align:center">{a["mapq"]}</td></tr>'
+            )
         n=len(ref_alns)
-        ref_note=('<p style="color:#27ae60;font-size:0.82em;margin-top:5px">&#10003; 단일 블록 &#8212; 단순 삽입</p>'
-                  if n<=1 else
-                  f'<p style="color:#e67e22;font-size:0.82em;margin-top:5px">&#9888; {n}개 블록 &#8594; 추가 구조변이 가능</p>')
+        n_inversion = hints.count("inversion")
+        n_transloc  = hints.count("transloc")
+        if n <= 1:
+            ref_note = '<p style="color:#27ae60;font-size:0.82em;margin-top:5px">&#10003; 단일 블록 &#8212; 단순 삽입</p>'
+        else:
+            warns = []
+            if n_inversion: warns.append(f'Inversion (역위) {n_inversion}개')
+            if n_transloc:  warns.append(f'Translocation (전좌) {n_transloc}개')
+            warn_txt = " / ".join(warns) if warns else ""
+            extra = f" ({warn_txt})" if warn_txt else ""
+            ref_note = f'<p style="color:#e67e22;font-size:0.82em;margin-top:5px">&#9888; {n}개 블록{extra} &#8594; 추가 구조변이 가능</p>'
+        # 범례
+        legend = ('<div style="font-size:0.74em;color:#888;margin-top:4px">'
+                  '<span style="background:#f0fff0;padding:1px 5px;border-radius:3px">Syntenic (공선성)</span> '
+                  '<span style="background:#fff0f0;padding:1px 5px;border-radius:3px">&#8635; Inversion (역위)</span> '
+                  '<span style="background:#fffbe6;padding:1px 5px;border-radius:3px">&#8646; Translocation (전좌)</span>'
+                  '</div>')
         blocks.append(
             f'<div style="background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:16px;margin-bottom:12px">'
             f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'
@@ -1104,7 +1343,7 @@ def build_hap_html(hap, contigs):
             f'<th style="padding:3px 6px;border-bottom:2px solid #dee2e6">#</th>'
             f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">Contig 위치</th>'
             f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">TG 커버리지</th>'
-            f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">방향</th>'
+            f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">방향 (genome 기준)</th>'
             f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">Ref 위치 (추정)</th>'
             f'<th style="padding:3px 6px;border-bottom:2px solid #dee2e6">mapq</th>'
             f'</tr></thead><tbody>{copy_rows}</tbody></table></div>'
@@ -1113,8 +1352,11 @@ def build_hap_html(hap, contigs):
             f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">Ref 좌표</th>'
             f'<th style="padding:3px 6px;text-align:left;border-bottom:2px solid #dee2e6">Contig 좌표</th>'
             f'<th style="padding:3px 6px;border-bottom:2px solid #dee2e6">Strand</th>'
+            f'<th style="padding:3px 6px;text-align:right;border-bottom:2px solid #dee2e6">Ref 길이</th>'
+            f'<th style="padding:3px 6px;text-align:right;border-bottom:2px solid #dee2e6">Aln 길이</th>'
+            f'<th style="padding:3px 6px;text-align:right;border-bottom:2px solid #dee2e6">Identity</th>'
             f'<th style="padding:3px 6px;border-bottom:2px solid #dee2e6">mapq</th>'
-            f'</tr></thead><tbody>{ref_rows}</tbody></table>{ref_note}</div>'
+            f'</tr></thead><tbody>{ref_rows}</tbody></table>{ref_note}{legend}</div>'
             f'</div></div>'
         )
     return "\n".join(blocks)
@@ -1143,8 +1385,9 @@ cmp_rows="".join(
         ("카피 수",    hap_val("hap1",lambda c:str(len(c["copies"])),"0"),hap_val("hap2",lambda c:str(len(c["copies"])),"0")),
         ("카피 간격",  hap_val("hap1",lambda c:f'{c["gaps"][0]:,} bp' if c["gaps"] else "&#8212;"),
                        hap_val("hap2",lambda c:f'{c["gaps"][0]:,} bp' if c["gaps"] else "&#8212;")),
-        ("방향",       hap_val("hap1",lambda c:"역방향 (&#8722;)" if c["copies"] and c["copies"][0]["strand"]=="-" else "정방향 (+)"),
-                       hap_val("hap2",lambda c:"역방향 (&#8722;)" if c["copies"] and c["copies"][0]["strand"]=="-" else "정방향 (+)")),
+        ("방향 (genome)",
+                       hap_val("hap1",lambda c:("역방향 (&#8722;)" if c["copies"][0]["corrected_strand"]=="-" else "정방향 (+)" if c["copies"][0]["corrected_strand"]=="+" else "불명확 (?)") if c["copies"] else "N/A"),
+                       hap_val("hap2",lambda c:("역방향 (&#8722;)" if c["copies"][0]["corrected_strand"]=="-" else "정방향 (+)" if c["copies"][0]["corrected_strand"]=="+" else "불명확 (?)") if c["copies"] else "N/A")),
         ("Ref 정렬 블록",ref_badge("hap1"),ref_badge("hap2")),
     ]
 )
@@ -1152,15 +1395,20 @@ cmp_rows="".join(
 # 요약 카드 데이터
 all_copies  = [cp for hap in ["hap1","hap2"] for c in hap_data.get(hap,[]) for cp in c["copies"]]
 max_copies  = max((len(c["copies"]) for hap in ["hap1","hap2"] for c in hap_data.get(hap,[])), default=0)
-all_strands = [cp["strand"] for cp in all_copies]
-rep_strand  = max(set(all_strands),key=all_strands.count) if all_strands else "?"
-strand_lbl  = "역방향" if rep_strand=="-" else "정방향"
+# 방향: hybrid ref 결과 우선, 없으면 교정된 de novo 다수결
+if has_tg_strand:
+    rep_strand = tg_strand_ref
+else:
+    corr_strands = [cp["corrected_strand"] for cp in all_copies if cp["corrected_strand"] != "?"]
+    rep_strand   = max(set(corr_strands), key=corr_strands.count) if corr_strands else "?"
+strand_lbl  = {"+" : "정방향", "-": "역방향"}.get(rep_strand, "불명확")
+strand_src  = "hybrid ref" if has_tg_strand else "de novo (교정)"
 
 # 표시할 대표 위치
 if has_hybrid:
     disp_chr   = prec_chr
     disp_pos   = f"{prec_pos:,} bp"
-    disp_prec  = "&#177; 4 bp"
+    disp_prec  = bp_support
     disp_color = "#b71c1c"
 else:
     disp_chr   = integration_chr
@@ -1180,7 +1428,7 @@ if has_hybrid:
         f'<tr><td style="color:#666;padding:4px 6px;width:45%">Chromosome</td><td style="font-family:monospace;font-weight:600;padding:4px 6px">{prec_chr}</td></tr>'
         f'<tr><td style="color:#666;padding:4px 6px">Breakpoint</td><td style="font-family:monospace;font-weight:600;color:#b71c1c;padding:4px 6px">{prec_pos:,} bp</td></tr>'
         f'<tr><td style="color:#666;padding:4px 6px">Range</td><td style="font-family:monospace;padding:4px 6px">{bp_range}</td></tr>'
-        f'<tr><td style="color:#666;padding:4px 6px">Supporting reads</td><td style="padding:4px 6px">{chimeric_n}개 chimeric reads</td></tr>'
+        f'<tr><td style="color:#666;padding:4px 6px">Support</td><td style="padding:4px 6px">{bp_support} / {chimeric_n}개 total</td></tr>'
         f'</table>'
         '</div>'
         '<div>'
@@ -1193,7 +1441,7 @@ if has_hybrid:
         f'<td style="padding:4px 7px"><span style="background:#fff3cd;color:#856404;padding:1px 6px;border-radius:8px;font-size:0.8em">&#177; 수 kb</span></td></tr>'
         f'<tr style="background:#f0fff0"><td style="padding:4px 7px"><strong>Hybrid ref</strong></td>'
         f'<td style="font-family:monospace;font-weight:600;color:#b71c1c;padding:4px 7px">{prec_chr}:{prec_pos:,}</td>'
-        f'<td style="padding:4px 7px"><span style="background:#d4edda;color:#155724;padding:1px 6px;border-radius:8px;font-size:0.8em">&#177; 4 bp</span></td></tr>'
+        f'<td style="padding:4px 7px"><span style="background:#d4edda;color:#155724;padding:1px 6px;border-radius:8px;font-size:0.8em">{bp_support}</span></td></tr>'
         '</tbody></table>'
         '</div>'
         '</div></div>'
@@ -1250,7 +1498,7 @@ html_out = (
     f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #1565c0"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">통합 염색체</div><div style="font-size:1.35em;font-weight:700;color:#1565c0;margin-top:2px">{disp_chr}</div><div style="font-size:0.74em;color:#666;margin-top:1px">reference</div></div>\n'
     f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid {disp_color}"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">통합 위치</div><div style="font-size:1.2em;font-weight:700;color:{disp_color};margin-top:2px;font-family:monospace">{pos_label}</div><div style="font-size:0.74em;color:#666;margin-top:1px">{disp_prec}</div></div>\n'
     f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #e74c3c"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">탠덤 카피 수</div><div style="font-size:1.35em;font-weight:700;color:#e74c3c;margin-top:2px">{max_copies}카피</div><div style="font-size:0.74em;color:#666;margin-top:1px">hap1 &amp; hap2</div></div>\n'
-    f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #6a1b9a"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">삽입 방향</div><div style="font-size:1.15em;font-weight:700;color:#6a1b9a;margin-top:2px">{strand_lbl}</div><div style="font-size:0.74em;color:#666;margin-top:1px">Reverse complement</div></div>\n'
+    f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #6a1b9a"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">삽입 방향 (genome)</div><div style="font-size:1.15em;font-weight:700;color:#6a1b9a;margin-top:2px">{rep_strand} {strand_lbl}</div><div style="font-size:0.74em;color:#666;margin-top:1px">{strand_src}</div></div>\n'
     + (f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #2e7d32"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">삽입 유전자</div><div style="font-size:1.2em;font-weight:700;color:#2e7d32;margin-top:2px"><em>{gene_name}</em></div><div style="font-size:0.74em;color:#666;margin-top:1px">{feat_type}</div></div>\n' if has_annot else '')
     + '</div>\n\n'
 
@@ -1261,7 +1509,7 @@ html_out = (
     '<h2 style="margin-top:0">&#129516; De Novo Assembly 분석</h2>\n'
     '<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start;margin-bottom:14px">\n'
     f'<table style="border-collapse:collapse;font-size:0.85em;white-space:nowrap"><thead><tr style="background:#f8f9fa"><th style="padding:4px 7px;text-align:left;border-bottom:2px solid #dee2e6">항목</th><th style="padding:4px 7px;text-align:center;border-bottom:2px solid #dee2e6">hap1</th><th style="padding:4px 7px;text-align:center;border-bottom:2px solid #dee2e6">hap2</th></tr></thead><tbody>{cmp_rows}</tbody></table>\n'
-    '<div style="background:#fff8e1;border-radius:6px;padding:11px;font-size:0.84em"><div style="font-weight:600;color:#f57f17;margin-bottom:5px">&#9888; 주의사항</div><ul style="list-style:disc;padding-left:13px;color:#555;line-height:1.8"><li>De novo ref 위치는 선형 보간 추정값 &#8212; hybrid ref breakpoint가 더 정확</li><li>mapq 0/1 : 다중 카피로 인한 정상적 낮은 mapq</li><li>hap2 복수 블록 → 추가 구조변이 가능</li></ul></div>\n'
+    '<div style="background:#fff8e1;border-radius:6px;padding:11px;font-size:0.84em"><div style="font-weight:600;color:#f57f17;margin-bottom:5px">&#9888; 주의사항</div><ul style="list-style:disc;padding-left:13px;color:#555;line-height:1.8"><li>De novo ref 위치는 선형 보간 추정값 &#8212; hybrid ref breakpoint가 더 정확</li><li>방향(genome 기준): mapq&gt;0 contig는 ref 정렬로 교정, mapq=0은 hybrid ref chimeric reads 사용</li><li>mapq 0/1 : 다중 카피로 인한 정상적 낮은 mapq &#8212; 방향은 별도 소스로 교정됨</li><li>복수 블록 &#8594; Syntenic(공선성)/Inversion(역위)/Translocation(전좌) 여부는 Reference 정렬 블록 색상 참조</li></ul></div>\n'
     '</div>\n\n'
 
     '<h3 style="font-size:0.95em;font-weight:600;margin-bottom:8px">&#128204; Hap1</h3>\n'

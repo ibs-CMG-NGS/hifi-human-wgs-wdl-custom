@@ -33,7 +33,7 @@ miniwdl run workflows/transgene_integration.wdl \
     --input "${INPUT}" \
     --dir "${OUTPUT_DIR}" \
     --verbose \
-    2>&1 | tee "${LOG_FILE}"
+    < /dev/null 2>&1 | tee "${LOG_FILE}"
 
 exit_code=${PIPESTATUS[0]}
 

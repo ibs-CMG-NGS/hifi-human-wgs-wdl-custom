@@ -302,30 +302,37 @@ def get_file_size(filepath):
         return f"{size/1e3:.2f} KB"
 
 def count_vcf_variants(vcf_file):
-    """VCF 파일의 variant 개수 카운트"""
+    """VCF 파일의 PASS variant 개수 카운트 (RefCall 등 non-PASS 레코드 제외)"""
     if not os.path.exists(vcf_file):
         return 0
-    
+
     import subprocess
     try:
-        # bcftools가 있으면 사용
+        # NOTE: shell=True에 리스트 인자를 넘기면 첫 원소만 명령어로 쓰이고
+        # 나머지(파이프 포함)는 무시된다 -- bcftools가 인자 없이 실행돼 실패하고
+        # 항상 아래 except의 "전체 라인 카운트" fallback으로 빠지는 버그가 있었음.
+        # DeepVariant VCF는 RefCall(변이 아님) 레코드도 포함하므로 그 경로는
+        # 변이 수를 최대 10배 이상 부풀렸다. shell=True 없이 직접 호출 + PASS만 필터.
         result = subprocess.run(
-            ['bcftools', 'view', '-H', vcf_file, '|', 'wc', '-l'],
-            shell=True,
+            ['bcftools', 'view', '-H', '-f', 'PASS', vcf_file],
             capture_output=True,
-            text=True
+            text=True,
+            check=True,
         )
-        return int(result.stdout.strip())
-    except:
-        # bcftools가 없으면 직접 카운트
+        return sum(1 for line in result.stdout.splitlines() if line.strip())
+    except Exception:
+        # bcftools가 없거나 실패하면 직접 카운트 (PASS 레코드만)
         count = 0
         try:
             import gzip
             with gzip.open(vcf_file, 'rt') as f:
                 for line in f:
-                    if not line.startswith('#'):
+                    if line.startswith('#'):
+                        continue
+                    fields = line.split('\t', 7)
+                    if len(fields) > 6 and fields[6] == 'PASS':
                         count += 1
-        except:
+        except Exception:
             pass
         return count
 

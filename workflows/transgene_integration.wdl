@@ -120,6 +120,8 @@ workflow transgene_integration {
     input:
       hap1_ref_paf       = ref_align_hap1.paf,
       hap2_ref_paf       = ref_align_hap2.paf,
+      hap1_tg_paf        = map_hap1.paf,
+      hap2_tg_paf        = map_hap2.paf,
       runtime_attributes = default_runtime_attributes,
   }
 
@@ -152,6 +154,13 @@ workflow transgene_integration {
         hybrid_ref_fa      = build_hybrid_ref.hybrid_ref_fa,
         hybrid_ref_fai     = build_hybrid_ref.hybrid_ref_fai,
         region_reads_fq    = extract_region_reads.region_reads_fq,
+        out_prefix         = sample_id,
+        runtime_attributes = default_runtime_attributes,
+    }
+
+    call TG.sort_index_bam {
+      input:
+        in_sam             = align_to_hybrid_ref.hybrid_sam,
         out_prefix         = sample_id,
         runtime_attributes = default_runtime_attributes,
     }
@@ -197,6 +206,8 @@ workflow transgene_integration {
       precise_breakpoint_pos = select_first([detect_chimeric_reads.breakpoint_pos,   "0"]),
       breakpoint_range       = select_first([detect_chimeric_reads.breakpoint_range, "N/A"]),
       chimeric_count         = select_first([detect_chimeric_reads.chimeric_count,   "0"]),
+      bp_support             = select_first([detect_chimeric_reads.bp_support,       "N/A"]),
+      tg_strand_vs_ref       = select_first([detect_chimeric_reads.tg_strand,        "N/A"]),
       nearest_gene_name      = select_first([query_gene_annotation.nearest_gene_name,      "N/A"]),
       nearest_gene_type      = select_first([query_gene_annotation.nearest_gene_type,      "N/A"]),
       insertion_feature_type = select_first([query_gene_annotation.insertion_feature_type, "N/A"]),
@@ -223,12 +234,18 @@ workflow transgene_integration {
     String stat_integration_chr = extract_integration_coords.integration_chr
     String stat_integration_pos = extract_integration_coords.integration_pos
 
+    # hybrid reference 정밀 분석 BAM (IGV 시각화용)
+    File?  hybrid_bam            = sort_index_bam.bam
+    File?  hybrid_bai            = sort_index_bam.bai
+
     # hybrid reference 정밀 분석 결과 (선택적)
     File?  chimeric_reads_tsv   = detect_chimeric_reads.chimeric_tsv
     String stat_breakpoint_chr  = select_first([detect_chimeric_reads.breakpoint_chr,   "N/A"])
     String stat_breakpoint_pos  = select_first([detect_chimeric_reads.breakpoint_pos,   "0"])
     String stat_breakpoint_range= select_first([detect_chimeric_reads.breakpoint_range, "N/A"])
     String stat_chimeric_count  = select_first([detect_chimeric_reads.chimeric_count,   "0"])
+    String stat_bp_support      = select_first([detect_chimeric_reads.bp_support,       "N/A"])
+    String stat_tg_strand       = select_first([detect_chimeric_reads.tg_strand,        "N/A"])
 
     # 유전자 어노테이션 결과 (선택적)
     File?  annotation_tsv         = query_gene_annotation.annotation_tsv

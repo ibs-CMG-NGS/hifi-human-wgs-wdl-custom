@@ -34,6 +34,13 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 |------|------|
 | [docs/transgene_integration.md](./docs/transgene_integration.md) | 트랜스진 삽입 위치 분석 파이프라인 — 입력/출력, 실행 방법, 샘플별 설정 |
 
+**Base Modification Discovery 분석**
+
+| 문서 | 내용 |
+|------|------|
+| [docs/base_modification_discovery.md](./docs/base_modification_discovery.md) | PacBio kinetics 기반 5mC/5hmC/6mA + unknown modification 탐색 파이프라인 — 입력/출력, 실행 방법, rescue 분석 |
+| [docs/base_modification_discovery_design.md](./docs/base_modification_discovery_design.md) | 설계/계획 문서 — 문헌 근거, Task별 설계 의도, 계획 대비 구현 변경 사항 |
+
 **파일 포맷 명세**
 
 | 문서 | 내용 |
@@ -72,6 +79,7 @@ PacBio HiFi whole-genome sequencing 데이터 분석을 위한 WDL 기반 파이
 - `workflows/singleton.wdl` — 단일 샘플 분석
 - `workflows/family.wdl` — 가족/다중 샘플 joint calling
 - `workflows/transgene_integration.wdl` — 트랜스진 삽입 위치 분석
+- `workflows/base_modification_discovery.wdl` — kinetics 기반 base modification(5mC/5hmC/6mA/unknown) 발굴
 
 ### 분석 단계 (Singleton 기준)
 
