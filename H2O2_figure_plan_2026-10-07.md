@@ -65,6 +65,9 @@
 
 **f. Detection power.** With the observed between-replicate variation (residual SD of log private-SNV burden 0.18; 0.14 after normalizing to heterozygous-site count; df = 6), a 3-vs-3 run-paired comparison has 80 % power at α = 0.05 to detect a 1.65-fold (1.46-fold normalized) change in total burden. No condition differs at this scale (normalized burden 3.8–6.5 per 1,000 heterozygous sites, no treatment trend). **[ready]**
 
+**g. Transcriptional strand asymmetry (Supplementary 후보).** Sample-private SNVs (artefact-filtered) in protein-coding/lncRNA genes split by transcribed (T) vs untranscribed (U) strand of the pyrimidine. Germline-dominated classes show the expected untranscribed-strand excess (T>C 57 % U, p < 10⁻⁴; C>T 54 %, p = 0.009), validating the annotation, whereas C>A is symmetric in every condition (123 U vs 123 T overall; treated vs untreated no difference) and does not depend on promoter-methylation-inferred activity. The treatment-associated C>A excess is therefore not transcription-coupled; power is limited (~50 C>A per condition). **[ready — `base_mod_per_sample/strand_asymmetry.py`, `figure_data/strand_asymmetry.*`]**
+  - RNA-seq이 서버에 없어 발현은 프로모터 CpG 메틸화(12샘플 평균; <0.2 active, ≥0.6 silent)로 근사. 단일 분자 변이(요청서 ① 대체안)로 C>A 수가 늘면 재검정.
+
 *Supplementary:* joint-called SV burden giving 112 "significant" genes that are all multi-copy gene families (alignment artefact) — 왜 single-sample을 채택했는지.
 
 ---
@@ -121,6 +124,7 @@
 **c. 5mC–5hmC relationship** at gene bodies per condition. **[pending]** **[decide]**
 
 **d. Technical characterization of 6mA calls.** Per-sample 6mA call rate (~1 % of adenines at threshold 0.7 in the first chromosome examined — far above credible levels of native mammalian 6mA), its dependence on sequence context (5-mer; e.g. GGACT/CGACC enriched), mitochondrial versus nuclear rate, and fraction of reads from mycoplasma. Establishes that most calls reflect kinetic background rather than biology. **[pending — 6mA pileup·집계 진행 중(약 1–2일); 마이코플라스마 점검은 사용자 확인 대기]**
+  - **마이코플라스마 점검(완료):** 12샘플 × read 10만 개(총 120만)에서 마이코플라스마 7종(*M. orale, hyorhinis, arginini, fermentans, hominis, salivarium, A. laidlawii*)에 정렬된 read 0개. 마우스에 정렬되지 않는 read는 0.006–0.04 %이고 GC가 낮은 미정렬 read는 샘플당 0–8개. 오염은 6mA 신호의 출처가 아님(검출 한계 약 0.003 % read). read당 6mA 밀도는 마우스 핵 read에서 12샘플 모두 0.56–0.65 %로 균일, chrM read에서는 더 낮음. `figure_data/mycoplasma_summary.tsv`
 
 **e. 6mA enrichment by repeat class and condition.** Relative 6mA rate (feature / sample global) for RepeatMasker classes (e.g. satellite ~2.6× enriched in first data) and gene-level aggregation, model condition + run, permutation-calibrated. **[pending]** **[decide — 신호가 없거나 기술적이면 Fig 5에서 빼고 Supplementary로]**
 
