@@ -63,9 +63,16 @@ def sample_metrics(ds, sid):
 
 
 def private(ds):
-    files = [vcf_of(ds, s) for s in SIDS]
-    view = " ".join(f"<({BCF} view -t {CHR} -v snps -m2 -M2 -Ou {f})" for f in files)
-    cmd = f"{BCF} merge -m none --force-samples {view} -Ou | {BCF} query -f '%CHROM\\t%POS\\t%REF\\t%ALT[\\t%GT\\t%AD\\t%DP]\\n'"
+    # bcftools merge는 색인된 파일만 받으므로 샘플별 biallelic SNV를 색인된 BCF로 먼저 뽑는다
+    tmp = f"{QM}/private_tmp/{ds}"
+    subprocess.run(["mkdir", "-p", tmp], check=True)
+    files = []
+    for s in SIDS:
+        o = f"{tmp}/{s}.bcf"
+        subprocess.run([BCF, "view", "-t", CHR, "-v", "snps", "-m2", "-M2", "-Ob", "-o", o, "--write-index",
+                        vcf_of(ds, s)], check=True)
+        files.append(o)
+    cmd = f"{BCF} merge -m none --force-samples {' '.join(files)} -Ou | {BCF} query -f '%CHROM\\t%POS\\t%REF\\t%ALT[\\t%GT\\t%AD\\t%DP]\\n'"
     cnt = {s: [0, 0] for s in SIDS}
     p = subprocess.Popen(["bash", "-c", cmd], stdout=subprocess.PIPE, text=True)
     for line in p.stdout:

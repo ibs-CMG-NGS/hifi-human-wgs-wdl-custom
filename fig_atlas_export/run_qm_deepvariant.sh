@@ -98,10 +98,31 @@ genotyper_config:
       count: 0
       ignore_non_variants: true
 YML
+# 이 BAM들의 gVCF에는 methylation 호출이 만든 NoCall 행(ALT ".,<*>", CpG 위치 수백만 개)이 있어
+# GLnexus가 "allele is not a DNA sequence"로 거부한다. 원 파이프라인 gVCF에서는 같은 위치가
+# 참조 블록이므로, 이 행을 0/0 참조 블록 형식(ALT <*>, GT:GQ:MIN_DP:PL)으로 바꾼 사본을 쓴다.
+for sid in "${SIDS[@]}"; do
+  d="$QM/dv/$sid"; f="$d/$sid.glx.g.vcf.gz"
+  [ -f "$f.tbi" ] && continue
+  zcat "$d/$sid.g.vcf.gz" | awk -F'\t' -v OFS='\t' '
+    /^#/ {print; next}
+    $5 ~ /^\.,/ {
+      n = split($9, k, ":"); split($10, v, ":")
+      for (i = 1; i <= n; i++) x[k[i]] = v[i]
+      split(x["PL"], pl, ",")
+      print $1, $2, $3, $4, "<*>", 0, ".", "END=" $2, "GT:GQ:MIN_DP:PL", "0/0:0:" x["DP"] ":" pl[1] "," pl[2] "," pl[3]
+      delete x; next
+    }
+    {print}' > "$d/$sid.glx.g.vcf"
+  apptainer exec "${BIND[@]}" "$GLX_SIF" bcftools view -Oz -o "$f" "$d/$sid.glx.g.vcf"
+  apptainer exec "${BIND[@]}" "$GLX_SIF" bcftools index -t "$f"
+  rm -f "$d/$sid.glx.g.vcf"
+done
+
 for g in A B C D; do
   o="$QM/joint/$g.vcf.gz"
   [ -f "$o.tbi" ] && continue
-  gv=$(tail -n +2 "${REPO}/base_mod_per_sample/samples.tsv" | awk -F'\t' -v g=$g -v q="$QM" '$3==g{printf "%s/dv/%s/%s.g.vcf.gz ", q, $1, $1}')
+  gv=$(tail -n +2 "${REPO}/base_mod_per_sample/samples.tsv" | awk -F'\t' -v g=$g -v q="$QM" '$3==g{printf "%s/dv/%s/%s.glx.g.vcf.gz ", q, $1, $1}')
   rm -rf "$QM/joint/$g.DB"
   ( cd "$QM/joint" && nice -n 10 apptainer exec "${BIND[@]}" "$GLX_SIF" glnexus_cli --threads 4 --mem-gbytes 16 \
       --dir "$g.DB" --config ./config.yml --bed "$QM/regions.bed" $gv > "$g.bcf" 2> "$g.glnexus.log" )
