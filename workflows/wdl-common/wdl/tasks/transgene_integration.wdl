@@ -29,7 +29,8 @@ task map_transgene_to_assembly {
   command <<<
     set -euo pipefail
     minimap2 --version
-    minimap2 -cx asm20 --cs -t ~{threads} \
+    # -p 0.05 -N 50: asm20 기본값(-p 0.8)은 부분 카피·짧은 카피 정렬을 secondary로 버림 → tandem array의 partial copy 누락
+    minimap2 -cx asm20 --cs -p 0.05 -N 50 -t ~{threads} \
       ~{assembly_fasta} ~{transgene_fasta} \
       > ~{out_prefix}.tg_vs_asm.paf
   >>>
@@ -184,7 +185,7 @@ task align_chimeric_to_ref {
 
 task extract_integration_coords {
   meta {
-    description: "Chimeric-to-ref PAF에서 대략적 삽입 위치(chr/pos)를 빠르게 추출 — 이후 hybrid reference 분석의 시작점으로 사용"
+    description: "Chimeric contig PAF에서 TG 블록 양쪽의 host 접합 후보를 모두 수집 — 후보 클러스터링, 다중 위치·염색체 전환 경고"
   }
 
   parameter_meta {
@@ -192,10 +193,16 @@ task extract_integration_coords {
     hap2_ref_paf:       { name: "PAF: hap2 chimeric contigs vs reference" }
     hap1_tg_paf:        { name: "PAF: transgene vs hap1 assembly" }
     hap2_tg_paf:        { name: "PAF: transgene vs hap2 assembly" }
-    min_match_bp:       { name: "Minimum matching bases to consider (default: 1000)" }
+    min_match_bp:       { name: "Minimum matching bases for a TG hit (default: 500)" }
+    min_flank_bp:       { name: "Minimum host alignment length to call a flank (default: 2000)" }
+    transgene_fasta:    { name: "Transgene FASTA (checked for duplicated / circular ends)" }
+    bac_region:         { name: "[BAC] Reference interval of the BAC insert (chr:start-end); alignments inside it are construct, not host" }
     runtime_attributes: { name: "Runtime attribute structure" }
-    integration_chr:    { name: "Estimated integration chromosome" }
-    integration_pos:    { name: "Estimated integration position (bp)" }
+    integration_chr:    { name: "Primary junction cluster chromosome" }
+    integration_pos:    { name: "Primary junction cluster position (bp, 1-based last host base)" }
+    junctions_tsv:      { name: "All host/TG junction candidates (hap, contig, TG block, side, ref position, gap, mapq, cluster)" }
+    qc_warnings:        { name: "Semicolon-separated warnings (MULTI_SITE, SPLIT_JUNCTION, UNALIGNED_GAP, ONE_SIDED, TG_HOST_HOMOLOGY, DUPLICATED_ENDS)" }
+    loci_txt:           { name: "One candidate locus per line (chr<TAB>pos): every junction cluster, for read extraction" }
   }
 
   input {
@@ -203,72 +210,238 @@ task extract_integration_coords {
     File   hap2_ref_paf
     File   hap1_tg_paf
     File   hap2_tg_paf
-    Int    min_match_bp = 1000
+    Int    min_match_bp = 500
+    Int    min_flank_bp = 2000
+    File?  transgene_fasta
+    String construct_type = "plasmid"
+    String bac_region = ""
     RuntimeAttributes runtime_attributes
   }
 
   command <<<
     set -euo pipefail
-    echo "unknown" > integration_chr.txt
-    echo "0"       > integration_pos.txt
+    python3 << 'PYEOF'
+from collections import defaultdict
 
-    # TG vs assembly PAF에서 TG가 매핑된 contig 좌표 범위를 먼저 구한 뒤,
-    # ref PAF에서 그 직전 블록의 reference 좌표를 찾는다.
-    # (gap 기반 접근은 TG 카피 경계가 다른 chr에 매핑될 때 실패하므로 사용하지 않음)
-    for PAIR in "~{hap1_tg_paf}:~{hap1_ref_paf}" "~{hap2_tg_paf}:~{hap2_ref_paf}"; do
-      TG_PAF=$(echo "$PAIR" | cut -d: -f1)
-      REF_PAF=$(echo "$PAIR" | cut -d: -f2)
+BAC = "~{bac_region}".replace(",", "")
+bac = None
+if BAC:
+    c, se = BAC.split(":")
+    bac = (c, int(se.split("-")[0]), int(se.split("-")[1]))
 
-      if [ -s "$TG_PAF" ] && [ -s "$REF_PAF" ]; then
-        # TG가 매핑된 contig 좌표: target(=$6) 기준 start(=$8)/end(=$9)
-        TG_CONTIG_START=$(awk '{print $8}' "$TG_PAF" | sort -n | head -1)
-        TG_CONTIG_END=$(awk '{print $9}' "$TG_PAF" | sort -n | tail -1)
+def in_bac(chrom, s, e):
+    return bac is not None and chrom == bac[0] and min(e, bac[2]) - max(s, bac[1]) > 0
 
-        # ref PAF에서 TG_CONTIG_START 이전에 끝나는 블록 중 가장 마지막 것 선택
-        # (mapq >= 1 조건으로 저품질 매핑 제외)
-        # 폴백: 해당 블록이 없으면 TG_CONTIG_START를 포함하는 블록에서 선형 보간
-        awk -v tg_start="$TG_CONTIG_START" '
-          $12 >= 1 && $4+0 <= tg_start+0 {
-            if ($4+0 > best_qend+0) {
-              best_qend = $4
-              if ($5 == "-") { best_chr = $6; best_pos = $8 }
-              else            { best_chr = $6; best_pos = $9 }
-            }
-          }
-          $12 >= 1 && $3+0 <= tg_start+0 && $4+0 > tg_start+0 {
-            # TG가 이 블록 내부에 있음 — 선형 보간으로 ref 위치 추정
-            if (fb_chr == "") {
-              offset = tg_start - $3
-              if ($5 == "-") { fb_chr = $6; fb_pos = $9 - offset }
-              else            { fb_chr = $6; fb_pos = $8 + offset }
-            }
-          }
-          END {
-            if (best_chr != "") {
-              print best_chr > "integration_chr.txt"
-              print best_pos > "integration_pos.txt"
-            } else if (fb_chr != "") {
-              print fb_chr > "integration_chr.txt"
-              print fb_pos > "integration_pos.txt"
-            }
-          }
-        ' "$REF_PAF"
+MIN_MATCH  = ~{min_match_bp}
+MIN_FLANK  = ~{min_flank_bp}
+BLOCK_GAP  = 5000      # TG hits closer than this on a contig = one TG block (tandem array)
+FLANK_TOL  = 2000      # host alignment may overlap the TG block edge by this much
+MAX_GAP    = 20000     # a host alignment further than this from the TG block is not its flank
+CLUSTER_BP = 1000      # junction candidates within this distance = one junction
+SITE_BP    = 1000000   # junction clusters within this distance = one integration site
 
-        CHR=$(cat integration_chr.txt)
-        if [ "$CHR" != "unknown" ]; then break; fi
-      fi
-    done
+SPLIT_INDEL = 1000     # contig alignments are split at indels this large (asm5 often keeps a whole insertion inside one alignment)
 
-    echo "Integration coords: $(cat integration_chr.txt):$(cat integration_pos.txt)"
+def read_paf(path):
+    rows = []
+    try:
+        fh = open(path)
+    except OSError:
+        return rows
+    for line in fh:
+        p = line.rstrip("\n").split("\t")
+        if len(p) < 12:
+            continue
+        cs = next((x[5:] for x in p[12:] if x.startswith("cs:Z:")), "")
+        rows.append(dict(q=p[0], qlen=int(p[1]), qs=int(p[2]), qe=int(p[3]), strand=p[4], t=p[5],
+                         ts=int(p[7]), te=int(p[8]), match=int(p[9]), mapq=int(p[11]), cs=cs))
+    return rows
+
+def split_at_indels(a):
+    """Split one alignment into gap-free pieces at insertions/deletions >= SPLIT_INDEL (needs the cs tag).
+    cs runs along the reference; on '-' strand the query coordinate runs backwards."""
+    if not a["cs"]:
+        return [a]
+    import re as _re
+    pieces, t, q = [], a["ts"], (a["qs"] if a["strand"] == "+" else a["qe"])
+    t0, q0 = t, q
+    def close(t1, q1):
+        if t1 > t0:
+            qs_, qe_ = (q0, q1) if a["strand"] == "+" else (q1, q0)
+            pieces.append(dict(a, ts=t0, te=t1, qs=qs_, qe=qe_, cs=""))
+    step = 1 if a["strand"] == "+" else -1
+    for op, val in _re.findall(r"([:*+\-~])([0-9]+|[a-z]+)", a["cs"]):
+        if op == ":":
+            n = int(val); t += n; q += step * n
+        elif op == "*":
+            t += 1; q += step
+        elif op == "+":
+            if len(val) >= SPLIT_INDEL:
+                close(t, q); q += step * len(val); t0, q0 = t, q
+            else:
+                q += step * len(val)
+        elif op == "-":
+            if len(val) >= SPLIT_INDEL:
+                close(t, q); t += len(val); t0, q0 = t, q
+            else:
+                t += len(val)
+    close(t, q)
+    return pieces or [a]
+
+def overlap(a0, a1, b0, b1):
+    return max(0, min(a1, b1) - max(a0, b0))
+
+junctions, warnings = [], []
+if "~{construct_type}".upper() == "BAC" and not bac:
+    warnings.append("BAC_REGION_MISSING construct_type=BAC but bac_region is empty: the BAC's native locus will be "
+                    "mistaken for the integration site. Give the BAC interval (chr:start-end) and re-run")
+
+# construct FASTA check: a sequence whose start re-occurs inside it was cut from a circular map or has duplicated ends
+tg_fa = "~{default="" transgene_fasta}"
+if tg_fa:
+    name, seq = None, []
+    for line in open(tg_fa):
+        if line.startswith(">"):
+            name = line[1:].split()[0]
+        else:
+            seq.append(line.strip().upper())
+    seq = "".join(seq)
+    k = 100
+    if len(seq) > 4 * k and seq.find(seq[:k], k) > 0:
+        warnings.append(f"DUPLICATED_ENDS {name}: the first {k} bp re-occur at {seq.find(seq[:k], k) + 1} "
+                        "(circular map opened twice or duplicated backbone; copy counts and copy boundaries will be wrong)")
+
+for hap, tg_paf, ref_paf in (("hap1", "~{hap1_tg_paf}", "~{hap1_ref_paf}"),
+                             ("hap2", "~{hap2_tg_paf}", "~{hap2_ref_paf}")):
+    hits = defaultdict(list)                       # contig -> [(start, end)] of TG hits (PAF target = contig)
+    for r in read_paf(tg_paf):
+        if r["match"] >= MIN_MATCH:
+            hits[r["t"]].append((r["ts"], r["te"]))
+    refs = defaultdict(list)                       # contig -> ref alignments (PAF query = contig)
+    for r in read_paf(ref_paf):
+        refs[r["q"]].extend(split_at_indels(r))
+    for ctg, iv in hits.items():
+        iv.sort()
+        blocks = [list(iv[0])]
+        for s, e in iv[1:]:
+            if s - blocks[-1][1] <= BLOCK_GAP:
+                blocks[-1][1] = max(blocks[-1][1], e)
+            else:
+                blocks.append([s, e])
+        alns = [a for a in refs.get(ctg, []) if a["mapq"] >= 5 and a["qe"] - a["qs"] >= MIN_FLANK]
+        if bac:
+            # BAC mode: contig pieces that align inside the BAC interval are construct, never host flank
+            n0 = len(alns)
+            alns = [a for a in alns if not in_bac(a["t"], a["ts"], a["te"])]
+            if len(alns) < n0:
+                warnings.append(f"BAC_REGION {hap}:{ctg}: {n0 - len(alns)} alignment(s) inside {BAC} treated as construct")
+        for b0, b1 in blocks:
+            bid = f"{hap}:{ctg}:{b0 + 1}-{b1}"
+            # construct sequence that itself aligns to the reference (BAC insert, genomic promoter/UTR pieces)
+            homol = [a for a in alns if overlap(a["qs"], a["qe"], b0, b1) >= 0.5 * (b1 - b0)]
+            if homol:
+                # the TG hit is host sequence in its native place (e.g. a polyA/promoter/UTR piece of the construct,
+                # or a BAC insert): report it, but do not call integration junctions from it
+                for a in homol:
+                    # project the block onto the reference (ignores indels; approximate)
+                    rs = a["ts"] + (b0 - a["qs"]) if a["strand"] == "+" else a["te"] - (b1 - a["qs"])
+                    rs = max(rs, a["ts"])
+                    warnings.append(f"TG_HOST_HOMOLOGY {bid} ({b1 - b0} bp) sits in contiguous host sequence at approx. {a['t']}:{rs + 1}-{rs + b1 - b0} "
+                                    "(construct carries host-derived sequence; not used for junctions; if the construct is a BAC, "
+                                    "its native locus is NOT the integration site)")
+                continue
+            host = [a for a in alns if overlap(a["qs"], a["qe"], b0, b1) < 0.5 * (a["qe"] - a["qs"])]
+            left = [a for a in host if a["qe"] <= b0 + FLANK_TOL and b0 - a["qe"] <= MAX_GAP]
+            right = [a for a in host if a["qs"] >= b1 - FLANK_TOL and a["qs"] - b1 <= MAX_GAP]
+            sides = {}
+            if left:
+                a = max(left, key=lambda x: x["qe"])
+                # last host base before the TG block, in reference coordinates (1-based)
+                pos = a["te"] if a["strand"] == "+" else a["ts"] + 1
+                sides["left"] = (a, pos, b0 - a["qe"])
+            if right:
+                a = min(right, key=lambda x: x["qs"])
+                pos = a["ts"] + 1 if a["strand"] == "+" else a["te"]
+                sides["right"] = (a, pos, a["qs"] - b1)
+            for side, (a, pos, gap) in sides.items():
+                junctions.append(dict(hap=hap, contig=ctg, tg_block=bid, block_len=b1 - b0, side=side, chrom=a["t"], pos=pos,
+                                      gap_bp=gap, mapq=a["mapq"], aln_len=a["qe"] - a["qs"], strand=a["strand"]))
+                if gap > 500:
+                    warnings.append(f"UNALIGNED_GAP {bid} {side}: {gap} bp between TG and host alignment (linker / unmapped sequence)")
+            if len(sides) == 1:
+                warnings.append(f"ONE_SIDED {bid}: host flank found only on the {next(iter(sides))} side")
+            if len(sides) == 2:
+                (al, pl, _), (ar, pr, _) = sides["left"], sides["right"]
+                cl, cr = al["t"], ar["t"]
+                if cl != cr or abs(pl - pr) > SITE_BP:
+                    warnings.append(f"SPLIT_JUNCTION {bid}: left flank {cl}:{pl} vs right flank {cr}:{pr} "
+                                    "(chromosome switch or large rearrangement at the integration)")
+
+# cluster junction candidates (both haplotypes) -> junctions -> sites
+junctions.sort(key=lambda j: (j["chrom"], j["pos"]))
+clusters = []
+for j in junctions:
+    if clusters and clusters[-1]["chrom"] == j["chrom"] and j["pos"] - clusters[-1]["end"] <= CLUSTER_BP:
+        c = clusters[-1]; c["members"].append(j); c["end"] = j["pos"]
+    else:
+        clusters.append(dict(chrom=j["chrom"], start=j["pos"], end=j["pos"], members=[j]))
+for i, c in enumerate(clusters):
+    c["id"] = f"J{i + 1}"
+    for j in c["members"]:
+        j["cluster"] = c["id"]
+sites = []
+for c in clusters:
+    if sites and sites[-1]["chrom"] == c["chrom"] and c["start"] - sites[-1]["end"] <= SITE_BP:
+        sites[-1]["clusters"].append(c); sites[-1]["end"] = c["end"]
+    else:
+        sites.append(dict(chrom=c["chrom"], start=c["start"], end=c["end"], clusters=[c]))
+if len(sites) > 1:
+    desc = ", ".join(f"{s['chrom']}:{s['start']}-{s['end']} ({sum(len(c['members']) for c in s['clusters'])} candidates)" for s in sites)
+    warnings.append(f"MULTI_SITE {len(sites)} candidate integration sites: {desc}")
+
+chrom, pos = "unknown", "0"
+if clusters:
+    # most haplotypes, most candidates, largest TG block (the real array), left side first
+    best = max(clusters, key=lambda c: (len({m['hap'] for m in c['members']}), len(c["members"]),
+                                         max(m["block_len"] for m in c["members"]),
+                                         any(m["side"] == "left" for m in c["members"]),
+                                         max(m["mapq"] for m in c["members"])))
+    chrom = best["chrom"]
+    pos = str(sorted(m["pos"] for m in best["members"])[len(best["members"]) // 2])
+
+cols = ["cluster", "hap", "contig", "tg_block", "block_len", "side", "chrom", "pos", "gap_bp", "mapq", "aln_len", "strand"]
+with open("junction_candidates.tsv", "w") as f:
+    f.write("\t".join(cols) + "\n")
+    for j in junctions:
+        f.write("\t".join(str(j[c]) for c in cols) + "\n")
+with open("loci.txt", "w") as f:
+    for c in clusters:
+        f.write(f"{c['chrom']}\t{c['start']}\n")
+    if bac:
+        f.write(f"{bac[0]}\t{bac[1]}\n{bac[0]}\t{bac[2]}\n")
+open("integration_chr.txt", "w").write(chrom)
+open("integration_pos.txt", "w").write(pos)
+open("qc_warnings.txt", "w").write("; ".join(dict.fromkeys(warnings)) if warnings else "none")
+print(f"Junction candidates: {len(junctions)} in {len(clusters)} clusters / {len(sites)} sites")
+for c in clusters:
+    print(f"  {c['id']} {c['chrom']}:{c['start']}-{c['end']}  n={len(c['members'])}  "
+          f"sides={sorted({m['side'] for m in c['members']})}  haps={sorted({m['hap'] for m in c['members']})}")
+print(f"Primary: {chrom}:{pos}")
+for w in dict.fromkeys(warnings):
+    print("WARNING:", w)
+PYEOF
   >>>
 
   output {
     String integration_chr = read_string("integration_chr.txt")
     String integration_pos = read_string("integration_pos.txt")
+    File   junctions_tsv   = "junction_candidates.tsv"
+    String qc_warnings     = read_string("qc_warnings.txt")
+    File   loci_txt        = "loci.txt"
   }
 
   runtime {
-    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+    docker:                "quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1"
     cpu:                   1
     memory:                "2 GiB"
     disk:                  "5 GB"
@@ -285,16 +458,15 @@ task extract_integration_coords {
 
 task build_hybrid_ref {
   meta {
-    description: "Reference에서 삽입 염색체 서열 추출 후 transgene을 붙여 hybrid reference 생성"
+    description: "Whole reference genome + transgene = hybrid reference (reads may join the construct to any chromosome)"
   }
 
   parameter_meta {
-    ref_fasta:          { name: "Reference genome FASTA (with .fai alongside)" }
+    ref_fasta:          { name: "Reference genome FASTA" }
     transgene_fasta:    { name: "Transgene sequence FASTA" }
-    integration_chr:    { name: "Chromosome to extract (e.g. chr2)" }
     out_prefix:         { name: "Output prefix" }
     runtime_attributes: { name: "Runtime attribute structure" }
-    hybrid_ref_fa:      { name: "Hybrid FASTA: integration_chr + transgene" }
+    hybrid_ref_fa:      { name: "Hybrid FASTA: all reference sequences + transgene" }
     hybrid_ref_fai:     { name: "FAI index of hybrid FASTA" }
     tg_seqname:         { name: "Transgene sequence name in the hybrid reference" }
   }
@@ -302,32 +474,20 @@ task build_hybrid_ref {
   input {
     File   ref_fasta
     File   transgene_fasta
-    String integration_chr
     String out_prefix
     RuntimeAttributes runtime_attributes
   }
 
-  Int disk_size = ceil(size(ref_fasta, "GB") / 10 + 5)
+  # 이전 버전은 추정 염색체 하나만 넣어서, 다른 염색체의 접합(TG-6102 chr8, TG-6903 J2)을 볼 수 없었음
+  Int disk_size = ceil(size(ref_fasta, "GB") * 3 + 5)
 
   command <<<
     set -euo pipefail
-
-    # FAI가 없으면 생성 (ref_fasta 경로 기준 — 이미 존재하는 게 정상)
-    if [ ! -f "~{ref_fasta}.fai" ]; then
-      echo "FAI not found, creating..." >&2
-      samtools faidx "~{ref_fasta}"
-    fi
-
-    # 염색체 추출 + transgene 추가
-    samtools faidx "~{ref_fasta}" "~{integration_chr}" > "~{out_prefix}.hybrid_ref.fa"
+    cat "~{ref_fasta}" > "~{out_prefix}.hybrid_ref.fa"
     awk '/^>/{gsub(/ .*/,""); print; next} {print}' "~{transgene_fasta}" >> "~{out_prefix}.hybrid_ref.fa"
     samtools faidx "~{out_prefix}.hybrid_ref.fa"
-
-    # transgene sequence name 저장
     awk '/^>/{gsub(/^>/,""); print $1; exit}' "~{transgene_fasta}" > tg_seqname.txt
-
-    echo "Hybrid ref sequences:"
-    awk '{printf "  %s  %d bp\n", $1, $2}' "~{out_prefix}.hybrid_ref.fa.fai"
+    echo "Hybrid ref: $(wc -l < ~{out_prefix}.hybrid_ref.fa.fai) sequences (+ $(cat tg_seqname.txt))"
   >>>
 
   output {
@@ -360,9 +520,8 @@ task extract_region_reads {
   parameter_meta {
     haplotagged_bam:    { name: "HiFi reads aligned to reference (haplotagged BAM)" }
     haplotagged_bai:    { name: "BAM index (.bai)" }
-    integration_chr:    { name: "Chromosome of integration site" }
-    integration_pos:    { name: "Approximate integration position (bp)" }
-    window_bp:          { name: "Extraction window on each side of integration_pos (default: 300000)" }
+    loci_txt:           { name: "Candidate loci (chr<TAB>pos per line) from extract_integration_coords" }
+    window_bp:          { name: "Extraction window on each side of every locus (default: 300000)" }
     out_prefix:         { name: "Output prefix" }
     runtime_attributes: { name: "Runtime attribute structure" }
     region_reads_fq:    { name: "Extracted reads in FASTQ.gz" }
@@ -372,8 +531,7 @@ task extract_region_reads {
   input {
     File   haplotagged_bam
     File   haplotagged_bai
-    String integration_chr
-    String integration_pos
+    File   loci_txt
     Int    window_bp = 300000
     String out_prefix
     RuntimeAttributes runtime_attributes
@@ -389,15 +547,13 @@ task extract_region_reads {
     BAI="~{haplotagged_bai}"
     ln -sf "$BAI" "${BAM}.bai" 2>/dev/null || true
 
-    CENTER=~{integration_pos}
-    WINDOW=~{window_bp}
-    START=$(( CENTER > WINDOW ? CENTER - WINDOW : 0 ))
-    END=$(( CENTER + WINDOW ))
-    REGION="~{integration_chr}:${START}-${END}"
-    echo "Extracting reads from: $REGION"
+    # 모든 후보 위치(접합 클러스터, BAC 양 끝) ± window. 이전 버전은 첫 후보 하나만 사용
+    REGIONS=$(awk -v w=~{window_bp} '{s=$2-w; if(s<1)s=1; print $1":"s"-"$2+w}' "~{loci_txt}" | sort -u | tr '\n' ' ')
+    if [ -z "$REGIONS" ]; then echo "No candidate loci; nothing to extract." >&2; fi
+    echo "Extracting reads from: $REGIONS"
 
-    # -F 2304: supplementary(2048) + secondary(256) 제외 → 중복 없이 primary reads만
-    samtools view -b -F 2304 "$BAM" "$REGION" \
+    # -F 2304: supplementary(2048) + secondary(256) 제외, -M: 겹치는 region에서 같은 read 중복 출력 방지
+    samtools view -b -F 2304 -M "$BAM" $REGIONS \
       | samtools fastq - \
       | gzip > ~{out_prefix}.region_reads.fastq.gz
 
@@ -451,13 +607,15 @@ task align_to_hybrid_ref {
   }
 
   Int threads   = 16
-  Int mem_gb    = 24
-  # SAM이 PAF보다 크므로 디스크 여유 증가
-  Int disk_size = ceil(size(region_reads_fq, "GB") * 15 + size(hybrid_ref_fa, "GB") * 2 + 5)
+  Int mem_gb    = 32
+  # SAM이 PAF보다 크므로 디스크 여유 증가; whole-genome index(~8 GB) 포함
+  Int disk_size = ceil(size(region_reads_fq, "GB") * 15 + size(hybrid_ref_fa, "GB") * 6 + 5)
 
   command <<<
     set -euo pipefail
     minimap2 --version
+    # whole-genome hybrid ref → index 한 번만 생성
+    minimap2 -x map-hifi -t ~{threads} -d hybrid.mmi ~{hybrid_ref_fa}
 
     # PAF 출력 — detect_chimeric_reads 파서에서 직접 사용
     minimap2 \
@@ -465,7 +623,7 @@ task align_to_hybrid_ref {
       --cs \
       --secondary=no \
       -t ~{threads} \
-      ~{hybrid_ref_fa} \
+      hybrid.mmi \
       ~{region_reads_fq} \
       > ~{out_prefix}.hybrid_aligned.paf
     echo "PAF alignments: $(wc -l < ~{out_prefix}.hybrid_aligned.paf)"
@@ -475,7 +633,7 @@ task align_to_hybrid_ref {
       -ax map-hifi \
       --secondary=no \
       -t ~{threads} \
-      ~{hybrid_ref_fa} \
+      hybrid.mmi \
       ~{region_reads_fq} \
       > ~{out_prefix}.hybrid_aligned.sam
     echo "SAM records (non-header): $(grep -cv '^@' ~{out_prefix}.hybrid_aligned.sam || true)"
@@ -564,15 +722,18 @@ task detect_chimeric_reads {
     out_prefix:         { name: "Output prefix" }
     runtime_attributes: { name: "Runtime attribute structure" }
     breakpoint_chr:     { name: "Breakpoint chromosome" }
-    breakpoint_pos:     { name: "Breakpoint position (median of chimeric reads)" }
-    breakpoint_range:   { name: "Breakpoint position range (min-max)" }
+    breakpoint_pos:     { name: "Left junction (last host base before the insert, 1-based); right junction if no left" }
+    breakpoint_range:   { name: "chr:left_junction-right_junction (strand-aware read clusters)" }
     chimeric_count:     { name: "Number of chimeric reads supporting the breakpoint" }
     chimeric_tsv:       { name: "Per-read chimeric alignment details (TSV)" }
     tg_strand:          { name: "TG strand relative to reference genome (+/-/N/A)" }
+    bac_region:         { name: "[BAC] chr:start-end of the BAC insert; alignments inside it count as construct" }
+    junctions_tsv:      { name: "Every junction cluster (side, chrom, pos, reads), all chromosomes" }
   }
 
   input {
     File   hybrid_paf
+    String bac_region = ""
     String tg_seqname
     String out_prefix
     RuntimeAttributes runtime_attributes
@@ -605,73 +766,124 @@ with open(hybrid_paf) as f:
         })
 
 # ── Chimeric reads 탐색 ────────────────────────────────────────────────────────
-# chimeric = 동일 read가 host chr AND transgene 모두에 정렬된 경우
+# chimeric = 동일 read가 host AND construct 모두에 정렬된 경우.
+# construct = transgene 서열, BAC 모드에서는 BAC 구간(bac_region)에 정렬된 부분도 포함
+# (BAC 안의 Cre-Aldh1l1 같은 접합은 construct 내부 접합이므로 integration이 아님)
+BAC = "~{bac_region}".replace(",", "")
+bac = None
+if BAC:
+    _c, _se = BAC.split(":")
+    bac = (_c, int(_se.split("-")[0]), int(_se.split("-")[1]))
+
+def is_construct(a):
+    if a["target"] == tg_seqname:
+        return True
+    return bac is not None and a["target"] == bac[0] and min(a["t_end"], bac[2]) - max(a["t_start"], bac[1]) > 0.5 * (a["t_end"] - a["t_start"])
+
 chimeric = []
 for qname, alns in reads.items():
-    targets  = set(a["target"] for a in alns)
-    host_set = {t for t in targets if t != tg_seqname}
-    has_host = bool(host_set)
-    has_tg   = tg_seqname in targets
-    if has_host and has_tg:
-        chimeric.append({
-            "name":      qname,
-            "host_alns": [a for a in alns if a["target"] != tg_seqname],
-            "tg_alns":   [a for a in alns if a["target"] == tg_seqname],
-        })
+    host = [a for a in alns if not is_construct(a)]
+    cons = [a for a in alns if is_construct(a)]
+    if host and cons:
+        chimeric.append({"name": qname, "host_alns": host, "tg_alns": cons})
 
 print(f"Total chimeric reads: {len(chimeric)}")
 
 # ── Breakpoint 결정 ───────────────────────────────────────────────────────────
-# Read 내 좌표 기준으로 host와 TG가 인접한 경우의 host reference 좌표를 breakpoint로 사용
-# tolerance: 인접 판정 허용 거리 (bp)
-TOLERANCE = 1000
+# Read 내 좌표에서 host와 TG 정렬이 맞닿은 지점을 host reference 좌표로 환산.
+# host 정렬의 strand를 반드시 반영해야 함 ('-' 정렬은 read 끝 = ref t_start).
+#   left  junction: 삽입 바로 앞의 마지막 host 염기 (삽입은 ref 좌표가 큰 쪽)
+#   right junction: 삽입 바로 뒤의 첫 host 염기
+# 좌표는 1-based. left/right를 따로 모아 각각의 최빈 클러스터를 접합부로 보고,
+# 두 접합부 사이(right - left - 1)를 host 결실 길이로 보고.
+TOLERANCE  = 1000   # read 상에서 host/TG 정렬 끝이 이만큼 떨어져도 인접으로 판정
+CLUSTER_BP = 20     # 같은 접합부로 묶는 ref 좌표 허용 오차
 
-breakpoints     = []
-host_to_tg_bps  = []  # ha["t_end"]: host가 끝나고 TG가 시작되는 ref 좌표 = 삽입 경계
-tg_to_host_bps  = []  # ha["t_start"]: TG가 끝나고 host가 시작되는 ref 좌표
-host_chrs       = []
-tsv_rows        = ["read_name\thost_chr\thost_q_start\thost_q_end\thost_t_start\thost_t_end\ttg_q_start\ttg_q_end\tbreakpoint_pos\tjunction_type"]
+junction_calls = []   # (side, chrom, pos)
+host_chrs      = []
+tsv_rows       = ["read_name\thost_chr\thost_strand\thost_q_start\thost_q_end\thost_t_start\thost_t_end\ttg_q_start\ttg_q_end\tbreakpoint_pos\tjunction_side\tread_order"]
 
 for c in chimeric:
     for ha in c["host_alns"]:
         for ta in c["tg_alns"]:
-            # Case 1: host 정렬 끝 ≈ TG 정렬 시작 (read 상에서 host→TG 방향)
-            if abs(ha["q_end"] - ta["q_start"]) <= TOLERANCE:
-                bp = ha["t_end"]
-                jtype = "host->TG"
-                breakpoints.append(bp)
-                host_to_tg_bps.append(bp)
-                host_chrs.append(ha["target"])
-                tsv_rows.append(f'{c["name"]}\t{ha["target"]}\t{ha["q_start"]}\t{ha["q_end"]}\t{ha["t_start"]}\t{ha["t_end"]}\t{ta["q_start"]}\t{ta["q_end"]}\t{bp}\t{jtype}')
-            # Case 2: TG 정렬 끝 ≈ host 정렬 시작 (read 상에서 TG→host 방향)
-            elif abs(ta["q_end"] - ha["q_start"]) <= TOLERANCE:
-                bp = ha["t_start"]
-                jtype = "TG->host"
-                breakpoints.append(bp)
-                tg_to_host_bps.append(bp)
-                host_chrs.append(ha["target"])
-                tsv_rows.append(f'{c["name"]}\t{ha["target"]}\t{ha["q_start"]}\t{ha["q_end"]}\t{ha["t_start"]}\t{ha["t_end"]}\t{ta["q_start"]}\t{ta["q_end"]}\t{bp}\t{jtype}')
+            if abs(ha["q_end"] - ta["q_start"]) <= TOLERANCE:          # read: host → TG
+                order = "host->TG"
+                if ha["strand"] == "+":
+                    bp, side = ha["t_end"], "left"
+                else:
+                    bp, side = ha["t_start"] + 1, "right"
+            elif abs(ta["q_end"] - ha["q_start"]) <= TOLERANCE:        # read: TG → host
+                order = "TG->host"
+                if ha["strand"] == "+":
+                    bp, side = ha["t_start"] + 1, "right"
+                else:
+                    bp, side = ha["t_end"], "left"
+            else:
+                continue
+            junction_calls.append((side, ha["target"], bp))
+            host_chrs.append(ha["target"])
+            tsv_rows.append(f'{c["name"]}\t{ha["target"]}\t{ha["strand"]}\t{ha["q_start"]}\t{ha["q_end"]}\t{ha["t_start"]}\t{ha["t_end"]}\t{ta["q_start"]}\t{ta["q_end"]}\t{bp}\t{side}\t{order}')
 
 bp_chr = max(set(host_chrs), key=host_chrs.count) if host_chrs else "unknown"
 
-# host→TG reads = host 서열이 끝나고 TG 서열이 시작되는 지점 (삽입 경계 직접 지지)
-# TG→host reads = 삽입 내부 또는 반대 가닥 접합으로 breakpoint 추정에 사용하지 않음
-if host_to_tg_bps:
-    primary_bps = host_to_tg_bps
-    bp_support  = f"{len(host_to_tg_bps)} host->TG reads"
-else:
-    primary_bps = breakpoints
-    bp_support  = f"{len(breakpoints)} reads (no host->TG)"
+def best_cluster(positions):
+    """Largest group of positions within CLUSTER_BP; returns (mode position, size)."""
+    positions = sorted(positions)
+    best, i = (None, 0), 0
+    for k in range(len(positions)):
+        while positions[k] - positions[i] > CLUSTER_BP:
+            i += 1
+        if k - i + 1 > best[1]:
+            grp = positions[i:k + 1]
+            best = (max(set(grp), key=grp.count), k - i + 1)
+    return best
 
-if primary_bps:
-    bp_sorted  = sorted(primary_bps)
-    bp_median  = bp_sorted[len(bp_sorted) // 2]
-    bp_min_all = min(breakpoints)
-    bp_max_all = max(breakpoints)
-    bp_range   = f"{bp_chr}:{bp_min_all:,}-{bp_max_all:,}"
+left_pos,  n_left  = best_cluster([p for sd, ch, p in junction_calls if sd == "left"  and ch == bp_chr])
+right_pos, n_right = best_cluster([p for sd, ch, p in junction_calls if sd == "right" and ch == bp_chr])
+
+# every junction cluster on every chromosome (>= 2 reads), for multi-site / rearranged integrations
+all_clusters = []
+for side in ("left", "right"):
+    for chrom in sorted({ch for sd, ch, p in junction_calls if sd == side}):
+        pos = sorted(p for sd, ch, p in junction_calls if sd == side and ch == chrom)
+        grp = [pos[0]]
+        for p in pos[1:] + [None]:
+            if p is not None and p - grp[-1] <= CLUSTER_BP:
+                grp.append(p); continue
+            if len(grp) >= 2:
+                all_clusters.append((side, chrom, max(set(grp), key=grp.count), len(grp)))
+            if p is not None:
+                grp = [p]
+all_clusters.sort(key=lambda x: -x[3])
+with open(f"{out_prefix}.junctions.tsv", "w") as f:
+    f.write("side\tchrom\tpos\treads\n")
+    for side, chrom, p, n in all_clusters:
+        f.write(f"{side}\t{chrom}\t{p}\t{n}\n")
+print("Junction clusters (>= 2 reads):")
+for side, chrom, p, n in all_clusters:
+    print(f"  {side:5s} {chrom}:{p}  {n} reads")
+other = [c for c in all_clusters if c[1] != bp_chr]
+
+if left_pos or right_pos:
+    bp_median  = left_pos or right_pos
+    bp_support = f"{n_left} left-junction / {n_right} right-junction reads"
+    if left_pos and right_pos:
+        bp_range = f"{bp_chr}:{left_pos:,}-{right_pos:,}"
+        gap = right_pos - left_pos - 1
+        if abs(gap) > 1000000:
+            bp_support += f" (junctions {abs(gap):,} bp apart: rearrangement at the integration, not a simple host deletion)"
+        elif gap >= 0:
+            bp_support += f" (host deletion {gap:,} bp between junctions)"
+        else:
+            bp_support += f" (junctions overlap by {-gap:,} bp: target-site duplication or rearrangement)"
+    else:
+        bp_range = f"{bp_chr}:{bp_median:,} ({'left' if left_pos else 'right'} junction only)"
+    if other:
+        bp_support += f"; +{len(other)} junction cluster(s) on other chromosomes: " + ", ".join(f"{s} {c}:{p} ({n})" for s, c, p, n in other[:4])
     print(f"Breakpoint chromosome: {bp_chr}")
-    print(f"Breakpoint position:   {bp_chr}:{bp_median:,} ({bp_support})")
-    print(f"Breakpoint range:      {bp_range}")
+    print(f"Left junction:  {bp_chr}:{left_pos if left_pos else 'not found'} ({n_left} reads)")
+    print(f"Right junction: {bp_chr}:{right_pos if right_pos else 'not found'} ({n_right} reads)")
+    print(f"Breakpoint range: {bp_range}")
     print(f"Total chimeric reads:  {len(chimeric)}")
 else:
     bp_median  = 0
@@ -713,6 +925,7 @@ PYEOF
 
   output {
     File   chimeric_tsv     = "~{out_prefix}.chimeric_reads.tsv"
+    File   junctions_tsv    = "~{out_prefix}.junctions.tsv"
     String breakpoint_chr   = read_string("breakpoint_chr.txt")
     String breakpoint_pos   = read_string("breakpoint_pos.txt")
     String breakpoint_range = read_string("breakpoint_range.txt")
@@ -725,6 +938,63 @@ PYEOF
     docker:                "quay.io/biocontainers/busco:5.7.1--pyhdfd78af_1"
     cpu:                   2
     memory:                "8 GiB"
+    disk:                  "10 GB"
+    disks:                 "local-disk 10 HDD"
+    preemptible:           runtime_attributes.preemptible_tries
+    maxRetries:            runtime_attributes.max_retries
+    awsBatchRetryAttempts: runtime_attributes.max_retries  # !UnknownRuntimeKey
+    zones:                 runtime_attributes.zones
+    cpuPlatform:           runtime_attributes.cpuPlatform
+  }
+}
+
+# ── Step 5-4b (BAC) ───────────────────────────────────────────────────────────
+
+task bac_depth_qc {
+  meta {
+    description: "BAC 모드: BAC 구간 depth / 양쪽 flank depth. 1.3배 이상이면 BAC 사본이 native locus에 겹쳐 정렬된 것"
+  }
+
+  parameter_meta {
+    haplotagged_bam:    { name: "HiFi reads aligned to reference" }
+    haplotagged_bai:    { name: "BAM index" }
+    bac_region:         { name: "chr:start-end of the BAC insert" }
+    flank_bp:           { name: "Flank length on each side (default: 200000)" }
+    runtime_attributes: { name: "Runtime attribute structure" }
+    qc:                 { name: "QC string for the report" }
+  }
+
+  input {
+    File   haplotagged_bam
+    File   haplotagged_bai
+    String bac_region
+    Int    flank_bp = 200000
+    RuntimeAttributes runtime_attributes
+  }
+
+  command <<<
+    set -euo pipefail
+    BAM="~{haplotagged_bam}"
+    ln -sf "~{haplotagged_bai}" "${BAM}.bai" 2>/dev/null || true
+    R=$(echo "~{bac_region}" | tr -d ',')
+    C=${R%%:*}; S=$(echo ${R#*:} | cut -d- -f1); E=$(echo ${R#*:} | cut -d- -f2)
+    mean() { samtools depth -a -Q 20 -r "$1" "$BAM" | awk '{s+=$3; n++} END{printf "%.1f", (n ? s/n : 0)}'; }
+    IN=$(mean "$C:$S-$E")
+    L=$(mean "$C:$(( S > ~{flank_bp} ? S - ~{flank_bp} : 1 ))-$(( S - 1 ))")
+    RR=$(mean "$C:$(( E + 1 ))-$(( E + ~{flank_bp} ))")
+    awk -v i="$IN" -v l="$L" -v r="$RR" -v reg="$R" 'BEGIN{
+      f=(l+r)/2; ratio=(f>0 ? i/f : 0);
+      msg=sprintf("BAC_DEPTH %s mean %.1fx vs flanks %.1fx/%.1fx (ratio %.2f)", reg, i, l, r, ratio);
+      if (ratio >= 1.3) msg=msg " -> extra BAC copies map onto the native locus; the integration site is elsewhere (see junction clusters on other chromosomes)";
+      print msg > "qc.txt"; print msg }'
+  >>>
+
+  output { String qc = read_string("qc.txt") }
+
+  runtime {
+    docker:                "quay.io/biocontainers/samtools:1.21--h50ea8bc_0"
+    cpu:                   2
+    memory:                "4 GiB"
     disk:                  "10 GB"
     disks:                 "local-disk 10 HDD"
     preemptible:           runtime_attributes.preemptible_tries
@@ -930,6 +1200,7 @@ task integration_report {
     nearest_gene_type:      { name: "Biotype of nearest gene" }
     insertion_feature_type: { name: "exon / intron / intergenic" }
     nearest_exon_dist_bp:   { name: "Distance to nearest exon boundary (bp)" }
+    qc_warnings:            { name: "Semicolon-separated QC warnings from extract_integration_coords ('none' if clean)" }
     runtime_attributes:     { name: "Runtime attribute structure" }
     report_txt:             { name: "Integration site report (text)" }
     report_html:            { name: "Integration site report (HTML)" }
@@ -962,6 +1233,9 @@ task integration_report {
     String nearest_gene_type      = "N/A"
     String insertion_feature_type = "N/A"
     String nearest_exon_dist_bp   = "N/A"
+
+    # extract_integration_coords 경고 (다중 위치, 염색체 전환, host 유래 construct 서열 등)
+    String qc_warnings            = "none"
 
     RuntimeAttributes runtime_attributes
   }
@@ -1001,6 +1275,15 @@ feat_type      = "~{insertion_feature_type}"
 exon_dist_str  = "~{nearest_exon_dist_bp}"
 exon_dist      = int(exon_dist_str) if exon_dist_str.lstrip("-").isdigit() else -1
 has_annot      = gene_name != "N/A"
+
+# QC 경고 — 하나라도 있으면 리포트 상단에 표시 (단일 위치 결과를 그대로 믿지 말 것)
+import html as _html
+qc_raw         = r'''~{qc_warnings}'''.strip()
+qc_warns       = [w.strip() for w in qc_raw.split(";") if w.strip() and w.strip() not in ("none", "N/A")]
+warn_html      = ("" if not qc_warns else
+                  '<div style="background:#fff4e5;border-left:4px solid #e67e22;border-radius:8px;padding:12px 16px;margin-bottom:14px">'
+                  '<div style="font-weight:700;color:#a04000;margin-bottom:6px">QC warnings &#8212; review before reporting a single integration site</div><ul style="margin:0;padding-left:18px">'
+                  + "".join(f"<li style=\"font-size:0.86em;margin:2px 0\">{_html.escape(w)}</li>" for w in qc_warns) + "</ul></div>\n")
 
 # ── PAF 파싱 ───────────────────────────────────────────────────────────────────
 def parse_tg_paf(paf_file, min_match=500):
@@ -1112,6 +1395,11 @@ lines.append(f"Sample:     {sample_id}")
 lines.append(f"Transgene:  {transgene_name}")
 lines.append(f"Generated:  {today}")
 lines.append("=" * 70)
+
+if qc_warns:
+    lines.append("\n[QC WARNINGS — review before reporting a single integration site]")
+    for w in qc_warns:
+        lines.append(f"  ! {w}")
 
 if has_hybrid:
     lines.append(f"\n[PRECISE BREAKPOINT — hybrid reference analysis]")
@@ -1493,6 +1781,7 @@ html_out = (
     f'  <div style="font-size:1.55em;font-weight:700">{sample_id} Integration Report</div>\n'
     f'  <div style="margin-top:7px;font-size:0.87em;opacity:.85">Transgene: <strong>{transgene_name}</strong> &nbsp;&middot;&nbsp; Generated: {today}</div>\n'
     '</div>\n\n'
+    f'{warn_html}'
 
     f'<div style="display:grid;grid-template-columns:repeat({"5" if has_annot else "4"},1fr);gap:9px;margin-bottom:14px">\n'
     f'  <div style="background:#fff;border-radius:8px;padding:13px;border-left:4px solid #1565c0"><div style="font-size:0.72em;color:#888;font-weight:600;text-transform:uppercase">통합 염색체</div><div style="font-size:1.35em;font-weight:700;color:#1565c0;margin-top:2px">{disp_chr}</div><div style="font-size:0.74em;color:#666;margin-top:1px">reference</div></div>\n'

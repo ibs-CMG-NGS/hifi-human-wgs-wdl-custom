@@ -1,0 +1,9 @@
+# Verified integration junctions (read-level re-analysis 2026-10-14/15; kyg_mouse_tg_insertion_request r2).
+# sample	construct_type	bac_region	side	chrom	pos	note
+TG-6283	plasmid		left	chr2	5559779	3 bp host deletion; Camk1d intron
+TG-6283	plasmid		right	chr2	5559783	most right-junction reads run host -> Ttr passenger segment (chr18, missing from the construct FASTA, open item B3) -> TG, so only ~1 read joins host to TG directly
+TG-6903	plasmid		left	chr4	68426842	J1
+TG-6903	plasmid		right	chr4	13214688	J2, ~55 Mb from J1 (different chromosome segment)
+TG-6102	BAC	chr6:90478421-90706261	left	chr8	67514526	BAC end via ~179 bp linker
+TG-6102	BAC	chr6:90478421-90706261	right	chr8	67550084	BAC end; 35,557 bp host deletion
+# TG-6425 is wild-type: no junction expected

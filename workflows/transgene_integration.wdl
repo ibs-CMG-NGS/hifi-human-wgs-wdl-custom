@@ -29,7 +29,9 @@ workflow transgene_integration {
     min_match_bp:           { name: "Min matching bases to call chimeric contig (default: 500)" }
     haplotagged_bam:        { name: "[Optional] HiFi reads aligned to reference (haplotagged BAM) — enables hybrid reference fine-mapping" }
     haplotagged_bai:        { name: "[Optional] BAI index for haplotagged_bam — required when haplotagged_bam is provided" }
-    extract_window_bp:      { name: "Window (bp) around integration site for read extraction (default: 300000)" }
+    extract_window_bp:      { name: "Window (bp) around every candidate junction for read extraction (default: 300000)" }
+    construct_type:         { name: "plasmid (default) or BAC. BAC requires bac_region" }
+    bac_region:             { name: "[BAC] Reference interval carried by the BAC (chr:start-end); its native locus is NOT the integration site" }
     annotation_gtf_bgz:     { name: "[Optional] Sorted bgzipped Gencode GTF — enables gene annotation" }
     annotation_gtf_tbi:     { name: "[Optional] Tabix index for annotation_gtf_bgz — required when annotation_gtf_bgz is provided" }
     annotation_window_bp:   { name: "Window (bp) around breakpoint for gene annotation query (default: 200000)" }
@@ -44,6 +46,11 @@ workflow transgene_integration {
     File   hap2_fasta
     File   ref_fasta
     Int    min_match_bp = 500
+
+    # Construct type. BAC: the construct carries a large host-genome interval (bac_region); reads and contigs
+    # from that interval are construct, and the integration site is where BAC ends join other host DNA.
+    String construct_type = "plasmid"
+    String bac_region     = ""
 
     # Optional: hybrid reference fine-mapping (needs haplotagged BAM)
     File?  haplotagged_bam
@@ -118,6 +125,9 @@ workflow transgene_integration {
 
   call TG.extract_integration_coords {
     input:
+      transgene_fasta    = transgene_fasta,
+      construct_type     = construct_type,
+      bac_region         = bac_region,
       hap1_ref_paf       = ref_align_hap1.paf,
       hap2_ref_paf       = ref_align_hap2.paf,
       hap1_tg_paf        = map_hap1.paf,
@@ -133,7 +143,6 @@ workflow transgene_integration {
       input:
         ref_fasta          = ref_fasta,
         transgene_fasta    = transgene_fasta,
-        integration_chr    = extract_integration_coords.integration_chr,
         out_prefix         = sample_id,
         runtime_attributes = default_runtime_attributes,
     }
@@ -142,8 +151,7 @@ workflow transgene_integration {
       input:
         haplotagged_bam    = select_first([haplotagged_bam]),
         haplotagged_bai    = select_first([haplotagged_bai]),
-        integration_chr    = extract_integration_coords.integration_chr,
-        integration_pos    = extract_integration_coords.integration_pos,
+        loci_txt           = extract_integration_coords.loci_txt,
         window_bp          = extract_window_bp,
         out_prefix         = sample_id,
         runtime_attributes = default_runtime_attributes,
@@ -169,8 +177,19 @@ workflow transgene_integration {
       input:
         hybrid_paf         = align_to_hybrid_ref.hybrid_paf,
         tg_seqname         = build_hybrid_ref.tg_seqname,
+        bac_region         = bac_region,
         out_prefix         = sample_id,
         runtime_attributes = default_runtime_attributes,
+    }
+
+    if (construct_type == "BAC" && bac_region != "") {
+      call TG.bac_depth_qc {
+        input:
+          haplotagged_bam    = select_first([haplotagged_bam]),
+          haplotagged_bai    = select_first([haplotagged_bai]),
+          bac_region         = bac_region,
+          runtime_attributes = default_runtime_attributes,
+      }
     }
 
     # ── Step 5-5: 유전자 어노테이션 (annotation GTF 제공 시) ──────────────────
@@ -212,6 +231,7 @@ workflow transgene_integration {
       nearest_gene_type      = select_first([query_gene_annotation.nearest_gene_type,      "N/A"]),
       insertion_feature_type = select_first([query_gene_annotation.insertion_feature_type, "N/A"]),
       nearest_exon_dist_bp   = select_first([query_gene_annotation.nearest_exon_dist_bp,   "N/A"]),
+      qc_warnings            = extract_integration_coords.qc_warnings + "; " + select_first([bac_depth_qc.qc, "none"]),
       runtime_attributes     = default_runtime_attributes,
   }
 
@@ -233,6 +253,8 @@ workflow transgene_integration {
     # 대략적 통합 위치 (de novo 기반)
     String stat_integration_chr = extract_integration_coords.integration_chr
     String stat_integration_pos = extract_integration_coords.integration_pos
+    File   junction_candidates_tsv = extract_integration_coords.junctions_tsv
+    String stat_qc_warnings     = extract_integration_coords.qc_warnings
 
     # hybrid reference 정밀 분석 BAM (IGV 시각화용)
     File?  hybrid_bam            = sort_index_bam.bam
@@ -240,6 +262,8 @@ workflow transgene_integration {
 
     # hybrid reference 정밀 분석 결과 (선택적)
     File?  chimeric_reads_tsv   = detect_chimeric_reads.chimeric_tsv
+    File?  read_junctions_tsv   = detect_chimeric_reads.junctions_tsv
+    String stat_bac_depth_qc    = select_first([bac_depth_qc.qc, "N/A"])
     String stat_breakpoint_chr  = select_first([detect_chimeric_reads.breakpoint_chr,   "N/A"])
     String stat_breakpoint_pos  = select_first([detect_chimeric_reads.breakpoint_pos,   "0"])
     String stat_breakpoint_range= select_first([detect_chimeric_reads.breakpoint_range, "N/A"])
