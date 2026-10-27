@@ -8,12 +8,15 @@
 # 모형 2 (교란 점검): M ~ condition + run + tech,  tech = logit(STR 수축 지수, 2 bp) — 라이브러리 artifact 지표
 # 보정: run 안 조건 라벨 permutation(13,824 배치 중 N_PERM개 무작위)으로 "p < α 영역 수"와 최소 p의 null 분포
 # 패턴: F p < 1e-3 영역마다 run 효과를 뺀 샘플값과 tech의 상관(|r|) — 교란을 따라가는 영역 비율을 배경과 비교
-# 사용: Rscript dmr_limma.R samples.tsv tech.tsv COUNT_DIR OUT_DIR SET [N_PERM]
+# 정규화(선택, NORM=median): 샘플마다 영역 M의 중앙값을 빼서 전역 수준 차이(예: 5hmC 호출 보정 차이)를 제거하고
+#   영역 특이적 차이만 검정
+# 사용: Rscript dmr_limma.R samples.tsv tech.tsv COUNT_DIR OUT_DIR SET [N_PERM] [NORM]
 suppressPackageStartupMessages({library(limma); library(data.table)})
 args <- commandArgs(trailingOnly = TRUE)
 samples <- fread(args[1]); tech <- fread(args[2])
 cdir <- args[3]; odir <- args[4]; set <- args[5]
 n_perm <- if (length(args) >= 6) as.integer(args[6]) else 200
+norm <- if (length(args) >= 7) args[7] else "none"
 dir.create(odir, showWarnings = FALSE, recursive = TRUE)
 set.seed(1)
 
@@ -23,6 +26,7 @@ reg <- fread(file.path(cdir, paste0(set, ".regions.tsv.gz")))
 sids <- samples$sample_id
 meth <- meth[, sids]; cov <- cov[, sids]
 M <- log2((meth + 1) / (cov - meth + 1))
+if (norm == "median") M <- sweep(M, 2, apply(M, 2, median))
 grp <- factor(samples$group, levels = c("A", "B", "C", "D"))
 run <- factor(samples$run)
 tc <- tech[match(sids, tech$sample), contraction_idx_2bp]
