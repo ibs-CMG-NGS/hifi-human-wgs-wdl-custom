@@ -1,6 +1,8 @@
 """Fig 4e DMR 입력: 상염색체 영역별·샘플별 5mC 집계(메틸화 read 수, 전체 read 수, CpG 수).
 
-입력: 원 파이프라인 pb-CpG-tools combined bed(모델 기반 5mC %, coverage). 메틸화 read 수 = mod% × cov / 100.
+입력(MOD 인자)
+  5mC  (기본): 원 파이프라인 pb-CpG-tools combined bed(모델 기반 5mC %, coverage). 메틸화 read 수 = mod% × cov / 100.
+  5hmC       : base_modification_per_sample.wdl의 modkit CpG pileup TSV(chr, 0-based pos, N_valid, N_mod; jasmine 26.1.3)
 영역 집합 (상염색체만; 성염색체는 성 구성 차이로 제외)
   promoter : GENCODE vM36 protein_coding·lncRNA 유전자 TSS -1000 ~ +500
   genebody : protein_coding 유전자 전체
@@ -10,7 +12,7 @@
 영역 합은 샘플마다 자기 CpG의 누적합을 searchsorted로 구하므로 영역이 겹쳐도 된다.
 영역 유지: 모든 샘플에서 CpG ≥ 5개, 영역 coverage 합 ≥ 50
 출력: OUT_DIR/{set}.meth.tsv.gz, {set}.cov.tsv.gz (행=영역, 열=샘플), {set}.regions.tsv.gz
-사용: python dmr_region_counts.py samples.tsv OUT_DIR
+사용: python dmr_region_counts.py samples.tsv OUT_DIR [5mC|5hmC]
 """
 import gzip
 import os
@@ -22,6 +24,8 @@ import pandas as pd
 RES = "/data_4tb/hifi-human-wgs-wdl-custom/hifi-wdl-resources/GRCm39"
 meta = pd.read_csv(sys.argv[1], sep="\t")
 OUT = sys.argv[2]
+MOD = sys.argv[3] if len(sys.argv) > 3 else "5mC"
+HMC_DIR = "/mnt/OIM_HDD2/base_mod_discovery_pilot_output/h2o2_per_sample/5hmC"
 os.makedirs(OUT, exist_ok=True)
 AUTO = [f"chr{i}" for i in range(1, 20)]
 MIN_CPG, MIN_COV = 5, 50
@@ -31,6 +35,22 @@ def cpg_path(wgs_bam):
     run_dir = wgs_bam.split("/out/")[0]
     sid = wgs_bam.split("/")[-1].replace(".GRCm39.haplotagged.bam", "")
     return f"{run_dir}/out/cpg_combined_bed/{sid}.GRCm39.cpg_pileup.combined.bed.gz"
+
+
+def load_sample(r):
+    """상염색체 CpG별 (chrom, begin, meth read 수, cov)"""
+    if MOD == "5hmC":
+        df = pd.read_csv(f"{HMC_DIR}/{r.sample_id}/_LAST/call-modbam_cpg_pileup/work/{r.sample_id}.5hmC.tsv.gz",
+                         sep="\t", header=None, names=["chrom", "begin", "cov", "meth"], dtype={"chrom": str})
+        df = df[df.chrom.isin(AUTO)]
+        return df.assign(cov=df["cov"].astype(float), meth=df["meth"].astype(float))
+    df = pd.read_csv(cpg_path(r.wgs_haplotagged_bam), sep="\t", comment="#", usecols=[0, 1, 3, 5],
+                     names=["chrom", "begin", "mod", "cov"], header=None, dtype={"chrom": str},
+                     compression="gzip", low_memory=False)
+    df = df[df.chrom.isin(AUTO)]
+    df["cov"] = pd.to_numeric(df["cov"], errors="coerce")
+    df = df.dropna()
+    return df.assign(meth=df["mod"].astype(float) * df["cov"] / 100.0)
 
 
 # 영역 정의
@@ -71,19 +91,14 @@ for k in SETS:
 
 res = {k: {"meth": {}, "cov": {}, "ncpg": {}} for k in SETS}
 for _, r in meta.iterrows():
-    df = pd.read_csv(cpg_path(r.wgs_haplotagged_bam), sep="\t", comment="#", usecols=[0, 1, 3, 5],
-                     names=["chrom", "begin", "mod", "cov"], header=None, dtype={"chrom": str},
-                     compression="gzip", low_memory=False)
-    df = df[df.chrom.isin(AUTO)]
-    df["cov"] = pd.to_numeric(df["cov"], errors="coerce")
-    df = df.dropna()
+    df = load_sample(r)
     for k, R in SETS.items():
         m_out = np.zeros(len(R)); c_out = np.zeros(len(R)); n_out = np.zeros(len(R))
         for c, sub in df.groupby("chrom"):
             o = np.argsort(sub.begin.to_numpy())
             pos = sub.begin.to_numpy()[o]
             cov = sub["cov"].to_numpy(float)[o]
-            meth = sub["mod"].to_numpy(float)[o] * cov / 100.0
+            meth = sub["meth"].to_numpy(float)[o]
             cm, cc = np.concatenate([[0], np.cumsum(meth)]), np.concatenate([[0], np.cumsum(cov)])
             idx = np.flatnonzero(R.chrom.to_numpy() == c)
             lo = np.searchsorted(pos, R.start.to_numpy()[idx])
