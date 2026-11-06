@@ -178,15 +178,15 @@ hap2에서의 15% 부분 검출은 완전한 트랜스진 삽입이 아닌 비�
 
 | 파일 | 경로 |
 |------|------|
-| Haplotagged BAM | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/_LAST/out/merged_haplotagged_bam/TG-6903.GRCm39.haplotagged.bam` |
-| Hap1 assembly FASTA | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/_LAST/out/assembly_hap1_fasta/TG-6903.hifiasm.bp.hap1.p_ctg.fa` |
-| Hap2 assembly FASTA | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/_LAST/out/assembly_hap2_fasta/TG-6903.hifiasm.bp.hap2.p_ctg.fa` |
-| SV VCF | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/_LAST/out/phased_sv_vcf/TG-6903.GRCm39.structural_variants.phased.vcf.gz` |
-| Small variant VCF | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/_LAST/out/phased_small_variant_vcf/TG-6903.GRCm39.small_variants.phased.vcf.gz` |
-| Integration report (TXT) | `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6903_D01_integration_wdl/_LAST/out/report_txt/TG-6903.GFAP_GFP.integration_report.txt` |
-| Integration report (HTML) | `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6903_D01_integration_wdl/_LAST/out/report_html/TG-6903.GFAP_GFP.integration_report.html` |
-| Chimeric reads TSV | `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6903_D01_integration_wdl/_LAST/out/chimeric_reads_tsv/TG-6903.chimeric_reads.tsv` |
-| Integration sites TSV | `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6903_D01_integration_wdl/_LAST/out/integration_tsv/TG-6903.GFAP_GFP.integration_sites.tsv` |
+| Haplotagged BAM | `/data24/processed/wgs/TG/final/TG6903_D01/out/call-downstream/call-hiphase/work/TG-6903.GRCm39.haplotagged.bam` |
+| Hap1 assembly FASTA | `/data24/processed/wgs/TG/final/TG6903_D01/out/call-gfa_to_fasta_hap1/work/TG-6903.hifiasm.bp.hap1.p_ctg.fa` |
+| Hap2 assembly FASTA | `/data24/processed/wgs/TG/final/TG6903_D01/out/call-gfa_to_fasta_hap2/work/TG-6903.hifiasm.bp.hap2.p_ctg.fa` |
+| SV VCF | `/data24/processed/wgs/TG/final/TG6903_D01/out/call-downstream/call-hiphase/work/TG-6903.GRCm39.structural_variants.phased.vcf.gz` |
+| Small variant VCF | `/data24/processed/wgs/TG/final/TG6903_D01/out/call-downstream/call-hiphase/work/TG-6903.GRCm39.small_variants.phased.vcf.gz` |
+| Integration report (TXT) | `/data24/processed/wgs/TG/integration/TG6903_D01_integration_wdl/20260531_070509_transgene_integration/out/report_txt/TG-6903.GFAP_GFP.integration_report.txt` |
+| Integration report (HTML) | `/data24/processed/wgs/TG/integration/TG6903_D01_integration_wdl/20260531_070509_transgene_integration/out/report_html/TG-6903.GFAP_GFP.integration_report.html` |
+| Chimeric reads TSV | `/data24/processed/wgs/TG/integration/TG6903_D01_integration_wdl/20260531_070509_transgene_integration/out/chimeric_reads_tsv/TG-6903.chimeric_reads.tsv` |
+| Integration sites TSV | `/data24/processed/wgs/TG/integration/TG6903_D01_integration_wdl/20260531_070509_transgene_integration/out/integration_tsv/TG-6903.GFAP_GFP.integration_sites.tsv` |
 
 ---
 

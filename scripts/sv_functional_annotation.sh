@@ -11,9 +11,9 @@ OUT=/data_4tb/hifi-human-wgs-wdl-custom/output/sv_integration_annotation
 mkdir -p "$OUT"
 
 declare -A SV_VCFS
-SV_VCFS["TG-6102"]="/mnt/Ext_1tb_B/tg-integration-analysis/TG6102/20260227_103422_humanwgs_singleton/out/phased_sv_vcf/TG-6102.GRCm39.structural_variants.phased.vcf.gz"
-SV_VCFS["TG-6283"]="/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6283_B01/20260519_092741_humanwgs_singleton/out/phased_sv_vcf/TG-6283.GRCm39.structural_variants.phased.vcf.gz"
-SV_VCFS["TG-6903"]="/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/20260529_113141_humanwgs_singleton/out/phased_sv_vcf/TG-6903.GRCm39.structural_variants.phased.vcf.gz"
+SV_VCFS["TG-6102"]="/data24/processed/wgs/TG/integration/TG6102_A01_wgs/20261016_154023_humanwgs_singleton/out/phased_sv_vcf/TG-6102.GRCm39.structural_variants.phased.vcf.gz"
+SV_VCFS["TG-6283"]="/data24/processed/wgs/TG/final/TG6283_B01/out_complete/out/phased_sv_vcf/TG-6283.GRCm39.structural_variants.phased.vcf.gz"
+SV_VCFS["TG-6903"]="/data24/processed/wgs/TG/final/TG6903_D01/out/call-downstream/call-hiphase/work/TG-6903.GRCm39.structural_variants.phased.vcf.gz"
 
 declare -A SITES
 SITES["TG-6102"]="chr6:90534206"

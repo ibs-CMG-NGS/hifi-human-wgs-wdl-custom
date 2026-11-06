@@ -164,12 +164,14 @@ TG-6425의 HAP1/HAP2 assembly (hifiasm)를 대상으로, 아래 3개 transgene F
 
 | 파일 | 경로 |
 |------|------|
-| HiFi reads (FASTQ) | `/data_4tb/.../call-bam_to_fastq-0/work/m84285_260219_093939_s3.hifi_reads.bc2026.fastq` |
-| Haplotagged BAM | `/data_4tb/hifi-human-wgs-wdl-custom/output/TG6425_C01/_LAST/out/merged_haplotagged_bam/TG-6425.GRCm39.haplotagged.bam` |
-| Hap1 assembly FASTA | `/data_4tb/.../out/assembly_hap1_fasta/TG-6425.hifiasm.bp.hap1.p_ctg.fa` |
-| Hap2 assembly FASTA | `/data_4tb/.../out/assembly_hap2_fasta/TG-6425.hifiasm.bp.hap2.p_ctg.fa` |
-| SV VCF | `/data_4tb/.../out/phased_sv_vcf/TG-6425.GRCm39.structural_variants.phased.vcf.gz` |
-| 분석 통계 | `/data_4tb/.../out/stats_file/TG-6425.stats.txt` |
+| HiFi reads (raw BAM) | `/data24/raw/pacbio/r84285_20260219_052427/1_C01/hifi_reads/m84285_260219_093939_s3.hifi_reads.bc2026.bam` |
+| Haplotagged BAM | `/data24/processed/wgs/TG/final/TG6425_C01/out/call-downstream/call-hiphase/work/TG-6425.GRCm39.haplotagged.bam` |
+| Hap1 assembly FASTA | `/data24/processed/wgs/TG/final/TG6425_C01/out/call-gfa_to_fasta_hap1/work/TG-6425.hifiasm.bp.hap1.p_ctg.fa` |
+| Hap2 assembly FASTA | `/data24/processed/wgs/TG/final/TG6425_C01/out/call-gfa_to_fasta_hap2/work/TG-6425.hifiasm.bp.hap2.p_ctg.fa` |
+| SV VCF | `/data24/processed/wgs/TG/final/TG6425_C01/out/call-downstream/call-hiphase/work/TG-6425.GRCm39.structural_variants.phased.vcf.gz` |
+| 분석 통계 | `/data24/processed/wgs/TG/final/TG6425_C01/out/call-consolidate_stats/work/TG-6425.stats.txt` |
+
+> 2026-11-06: 중간산물 FASTQ는 정리됨. 필요 시 raw BAM에서 `bam_to_fastq`로 재생성.
 
 ---
 

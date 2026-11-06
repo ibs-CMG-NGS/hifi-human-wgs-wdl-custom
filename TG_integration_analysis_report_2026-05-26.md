@@ -238,14 +238,14 @@ Recommend: Junction PCR to confirm integration, Aldh1l1 expression check in astr
 ## 5. TG-6425 C01 — Status
 
 - **Transgene:** Aldh1l1-EGFP
-- **HiFi reads:** `/mnt/Ext_1tb_B/r84285_20260219_052427/1_C01/hifi_reads/m84285_260219_093939_s3.hifi_reads.bc2026.bam`
+- **HiFi reads:** `/data24/raw/pacbio/r84285_20260219_052427/1_C01/hifi_reads/m84285_260219_093939_s3.hifi_reads.bc2026.bam`
 - **Pipeline:** `humanwgs_singleton` (PID 1216218, started 2026-05-26)
-- **Output directory:** `/mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01`
+- **Output directory:** `/data24/processed/wgs/TG/integration/TG6425_C01_integration_analysis`
 - **Integration inputs:** `TG6425.tg_integration.inputs.json` (ready)
 - **Post-completion command:**
   ```bash
   bash run_tg_integration.sh TG-6425 TG6425.tg_integration.inputs.json \
-    /mnt/Ext_1tb_A/tg-integration-denovo-assembly/TG6425_C01_integration_analysis
+    /data24/processed/wgs/TG/integration/TG6425_C01_integration_analysis
   ```
 
 ---
@@ -258,7 +258,7 @@ Recommend: Junction PCR to confirm integration, Aldh1l1 expression check in astr
 | High | TG-6425 C01 integration analysis | After humanwgs_singleton completes |
 | Medium | TG-6283 RNA-seq follow-up | Check Camk1d expression in brain tissue |
 | Medium | TG-6102 junction PCR | Confirm 73 bp deletion at chr6:90,534,206 |
-| Low | TG-6903 D01 preparation | BAM at `/mnt/Ext_1tb_B/r84285_20260219_052427/1_D01/hifi_reads/m84285_260219_114241_s4.hifi_reads.bc2027.bam` (49 GB) |
+| Low | TG-6903 D01 preparation | BAM at `/data24/raw/pacbio/r84285_20260219_052427/1_D01/hifi_reads/m84285_260219_114241_s4.hifi_reads.bc2027.bam` (52 GB) |
 
 ---
 
@@ -271,7 +271,7 @@ Recommend: Junction PCR to confirm integration, Aldh1l1 expression check in astr
 | `TG6425.inputs.json` | TG-6425 humanwgs_singleton inputs |
 | `run_TG6425_C01.sh` | TG-6425 pipeline run script |
 | `TG6102.tg_integration.extracted.inputs.json` | TG-6102 integration inputs (extracted FASTA) |
-| `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6102_A01_integration_analysis/tg_sequence_analysis/h2tg000140l_82886_85449_TG_insert.fa` | Extracted 2,563 bp actual TG insert (TG-6102) |
-| `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6102_A01_integration_analysis/tg_sequence_analysis/TG6102_sequence_comparison_report.txt` | TG FASTA mismatch analysis report |
-| `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6283_B01_integration_analysis/TG-6283_integration_report.html` | TG-6283 final HTML report |
-| `/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6102_A01_integration_analysis/20260526_095733_transgene_integration/call-integration_report/out/report_html/TG-6102.Aldh1l1_CreERT2.integration_report.html` | TG-6102 final HTML report (extracted FASTA) |
+| `/data24/processed/wgs/TG/integration/TG6102_A01_integration_analysis/tg_sequence_analysis/h2tg000140l_tg_insert_extracted.fa` | Extracted 2,563 bp actual TG insert (TG-6102) |
+| `/data24/processed/wgs/TG/integration/TG6102_A01_integration_analysis/tg_sequence_analysis/TG6102_sequence_comparison_report.txt` | TG FASTA mismatch analysis report |
+| `/data24/processed/wgs/TG/integration/TG6283_B01_integration_analysis/TG-6283_integration_report.html` | TG-6283 final HTML report |
+| `/data24/processed/wgs/TG/integration/TG6102_A01_integration_analysis/20260526_095733_transgene_integration/call-integration_report/out/report_html/TG-6102.Aldh1l1_CreERT2.integration_report.html` | TG-6102 final HTML report (extracted FASTA) |
