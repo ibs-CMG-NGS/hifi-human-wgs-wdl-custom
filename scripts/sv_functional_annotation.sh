@@ -15,10 +15,19 @@ SV_VCFS["TG-6102"]="/mnt/Ext_1tb_B/tg-integration-analysis/TG6102/20260227_10342
 SV_VCFS["TG-6283"]="/mnt/JJ_dis_8tb/tg-integration-denovo-assembly/TG6283_B01/20260519_092741_humanwgs_singleton/out/phased_sv_vcf/TG-6283.GRCm39.structural_variants.phased.vcf.gz"
 SV_VCFS["TG-6903"]="/data_4tb/hifi-human-wgs-wdl-custom/output/TG6903_D01/20260529_113141_humanwgs_singleton/out/phased_sv_vcf/TG-6903.GRCm39.structural_variants.phased.vcf.gz"
 
+# 주의: 각 라인의 "삽입 위치"는 host↔construct 접합부다.
+# TG-6102 는 BAC 라인이라 construct 자체가 chr6 마우스 서열 227,841 bp 를 품고 있다.
+# 이전 값 chr6:90534206 은 BAC 내부의 Aldh1l1 ATG 자리(cassette 치환 지점)이지
+# 유전체 삽입 위치가 아니다. 실제 접합부는 chr8 이고, 그 사이 35,557 bp 가 결실됐다.
+#   TG-6102 J1 chr8:67,514,526 / J2 chr8:67,550,084  (±500 kb 창이 둘 다 덮는다)
 declare -A SITES
-SITES["TG-6102"]="chr6:90534206"
+SITES["TG-6102"]="chr8:67514526"
 SITES["TG-6283"]="chr2:5559779"
 SITES["TG-6903"]="chr4:68426842"
+
+# 미해결: TG-6903 은 접합부가 둘이고 약 55 Mb 떨어져 있다(J1 chr4:68,426,842,
+# J2 chr4:13,214,688). 아래 ±500 kb 창은 J1 만 덮으므로 J2 주변 SV 는 집계되지
+# 않는다. 다중 접합부 지원은 별도 작업.
 
 WINDOW=500000
 
