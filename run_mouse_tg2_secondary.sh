@@ -37,10 +37,10 @@ WORK_DIR="/data_4tb/hifi-human-wgs-wdl-custom"
 OUT_ROOT="/data24/processed/wgs/TG/secondary/2026-kyg-mouse-tg-2"
 
 # 인자로 샘플을 주면 그것만 돈다. 안 주면 아래 목록을 쓴다.
-# TODO: C01/D01 의 이름을 well_inputs.py 로 읽어서 추가한다.
+# 네 샘플 모두 well_inputs.py 로 metadata 에서 읽은 이름이다 (2026-11-26).
 SAMPLES=("$@")
 if [ ${#SAMPLES[@]} -eq 0 ]; then
-    SAMPLES=(pv-cre camk-cre)
+    SAMPLES=(pv-cre camk-cre aldh1l1-egfp hba-floxed)
 fi
 
 # miniwdl 이 미리 받아 둔 이미지를 쓰게 한다. 이게 없으면 첫 실행이 33개
