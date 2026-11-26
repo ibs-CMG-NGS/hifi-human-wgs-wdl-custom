@@ -36,6 +36,23 @@ conda activate hifi-human-wgs
 WORK_DIR="/data_4tb/hifi-human-wgs-wdl-custom"
 OUT_ROOT="/data24/processed/wgs/TG/secondary/2026-kyg-mouse-tg-2"
 
+# **중복 실행 방지.** 2026-11-26 에 이 스크립트를 두 번 띄워서 pv-cre 가 동시에
+# 두 번 돌았다. 더 나빴던 건 정리였다: miniwdl 만 죽이면 감싼 루프가 "끝났구나"
+# 하고 다음 샘플을 새로 시작하고, apptainer 가 띄운 컨테이너는 부모가 init 인
+# 별도 트리라 살아남아 계속 쓴다. 호스트 경로로는 안 보여서(컨테이너 안에서는
+# /mnt/miniwdl_task_container/...) 찾기도 어렵다. 애초에 두 번 돌지 못하게 한다.
+mkdir -p "${OUT_ROOT}" || exit 1
+exec 9>"${OUT_ROOT}/.run.lock" || exit 1
+flock -n 9 || {
+    echo "ERROR: 이미 실행 중이다 (lock: ${OUT_ROOT}/.run.lock)."
+    echo "       확인:  pgrep -af run_mouse_tg2_secondary.sh"
+    echo "       정말 중단하려면 **부모 bash 루프를 먼저** 끊고, 그 다음"
+    echo "       miniwdl 에 TERM, 마지막으로 남은 컨테이너 프로세스를 본다:"
+    echo "         pgrep -x samtools   # inode 로 대상 run 을 가려야 한다"
+    exit 1
+}
+echo "lock 획득: ${OUT_ROOT}/.run.lock (pid $$)"
+
 # 인자로 샘플을 주면 그것만 돈다. 안 주면 아래 목록을 쓴다.
 # 네 샘플 모두 well_inputs.py 로 metadata 에서 읽은 이름이다 (2026-11-26).
 SAMPLES=("$@")
@@ -65,7 +82,10 @@ done
 echo "=== 샘플 ${#SAMPLES[@]}개: ${SAMPLES[*]}"
 for S in "${SAMPLES[@]}"; do
     OUTPUT_DIR="${OUT_ROOT}/${S}_wgs"
-    LOG_FILE="${OUTPUT_DIR}.nohup.log"
+    # 타임스탬프를 붙인다. 고정 경로(${OUTPUT_DIR}.nohup.log)로 두었더니
+    # 같은 샘플이 두 번 돌 때 두 tee 가 같은 파일을 덮어써서 어느 쪽 로그인지
+    # 알 수 없었다.
+    LOG_FILE="${OUTPUT_DIR}.$(date +%Y%m%dT%H%M%S).nohup.log"
     mkdir -p "${OUTPUT_DIR}" || exit 1
     echo "=== ${S} humanwgs_singleton start $(date) ==="
     miniwdl run workflows/singleton.wdl \
