@@ -3,7 +3,12 @@
 PacBio Revio Raw Data QC Report Generator
 SMRT Link Run Details report 기준으로 HiFi raw data를 평가하여 HTML 리포트 생성
 
-PacBio Revio v13.3 QC thresholds (24-hr movie time, 15-20 kb WGS library):
+근거 문서: docs/103-604-700 SMRT Link Run Details report overview, Revio v13.3 Rev 01.pdf
+적용 스펙 행: **15–20 kb 라이브러리** (문서 표에서 24-hr 와 짝지어진 행,
+HiFi yield 100–120 Gb, Q30+ 90%). 실제 movie time 은 30 hr 이라 이 행보다
+유리한 조건이다.
+
+PacBio Revio v13.3 QC thresholds (15-20 kb WGS library 행):
   - HiFi Yield          : PASS ≥100 Gb | WARNING 70-100 Gb | FAIL <70 Gb
   - HiFi Read Length    : PASS ≥15 kb  | WARNING 10-15 kb  | FAIL <10 kb
   - HiFi Read Quality   : PASS ≥Q30   | WARNING Q20-Q30   | FAIL <Q20
@@ -12,6 +17,10 @@ PacBio Revio v13.3 QC thresholds (24-hr movie time, 15-20 kb WGS library):
   - Missing Adapter     : PASS <5%    | WARNING 5-10%     | FAIL ≥10%
   - Control Read Count  : PASS ≥500   | WARNING 250-499   | FAIL <250
   - Control Read Length : PASS ≥50 kb | WARNING 20-50 kb  | FAIL <20 kb
+  - Control Concordance : PASS ≥88%   | WARNING <88%
+
+control 세 지표와 P1 은 **장비가 계산해 둔 값을 읽는다**. 직접 계산하지 않는다 —
+이유는 read_instrument_reports() 주석에 적었다.
 
 Usage (single run):
   python3 pacbio_rawdata_qc.py --run-dir /data_4tb/pacbio_rawdata/r84285_XXXXXXXX \
@@ -31,13 +40,13 @@ import json
 import os
 import re
 import glob
-import subprocess
 import sys
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
 
-# ─── QC Thresholds (24-hr, 15-20 kb WGS) ────────────────────────────────────
+# ─── QC Thresholds (15-20 kb WGS 행) ────────────────────────────────────────
 
 THRESHOLDS = {
     "hifi_yield_gb": {
@@ -90,6 +99,13 @@ THRESHOLDS = {
         "label": "Control Read Length mean (kb)",
         "direction": "higher_better",
     },
+    # 문서는 "mean & mode are typically ≥88%" 한 줄만 말한다. 그 아래를 다시
+    # WARNING / FAIL 로 쪼갤 근거가 문서에 없으므로 쪼개지 않는다 (2단 판정).
+    "control_concordance_pct": {
+        "pass_min": 88,
+        "label": "Control Read Concordance mean (%)",
+        "direction": "higher_better_soft",
+    },
 }
 
 
@@ -109,6 +125,10 @@ def evaluate(metric_key, value):
             return "WARNING"
         else:
             return "FAIL"
+
+    elif direction == "higher_better_soft":
+        # 문서가 기대값 한 개만 주는 지표. FAIL 선을 우리가 만들지 않는다.
+        return "PASS" if value >= t["pass_min"] else "WARNING"
 
     elif direction == "lower_better":
         if value <= t["pass_max"]:
@@ -185,29 +205,78 @@ def parse_ccs_report(json_path):
     }
 
 
-def get_control_metrics(bam_path):
-    """Count control reads and compute mean read length from subreads BAM."""
-    if not os.path.exists(bam_path):
-        return {"control_read_count": None, "control_read_length_mean_kb": None}
+def read_instrument_reports(stats_dir, movie_name):
+    """장비가 이미 계산해 둔 control / loading 지표를 읽는다.
+
+    **왜 직접 계산하지 않나.** 예전에는 control 지표를
+    `metadata/*.sequencing_control.subreads.bam` 을 열어 SEQ 길이 평균으로
+    계산했다. 그 값은 control 템플릿을 **한 번 통과한 subread 의 길이**
+    (23~25 kb) 다. 문서 103-604-700 이 말하는 `control read length is
+    typically ≥50 kb` 는 control 의 **polymerase read length** 다 — 한 ZMW 의
+    모든 통과를 합친 길이. 단위가 달라서 28개 샘플 전부가 WARNING 으로
+    찍혔고, 임계값이 틀린 것으로 오해했다. 실제로는 임계값이 맞고 측정이
+    틀렸다 (장비값으로 재집계하면 과거 24웰 중 23웰 PASS).
+
+    read count 도 같은 문제였다 — subread 개수(수천)를 세고 있었고 장비가
+    말하는 control read 수는 ZMW 기준이다.
+
+    P1 도 마찬가지다. ccs_report 기반 계산은 근사치이고, 원래 주석도
+    "exact P1 requires SMRT Link instrument metrics" 라고 적어 두었다.
+    그 instrument metrics 가 같은 statistics/ 폴더 안에 있었다.
+
+    읽는 곳: statistics/<movie>.reports.zip 안의
+        control.report.json  -> reads_n / readlength_mean / concordance_mean·mode
+        loading.report.json  -> productivity_0_n / _1_n / _2_n
+
+    reports.zip 이 없으면 전부 None 을 돌려준다. subreads BAM 으로 추정해서
+    틀린 단위의 값을 임계값에 들이대지 않는다.
+    """
+    out = {
+        "control_read_count": None,
+        "control_read_length_mean_kb": None,
+        "control_concordance_pct": None,
+        "control_concordance_mode_pct": None,
+        "p1_pct_instrument": None,
+        "p2_pct_instrument": None,
+    }
+    zip_path = os.path.join(stats_dir, f"{movie_name}.reports.zip")
+    if not os.path.exists(zip_path):
+        return out
 
     try:
-        result = subprocess.run(
-            ["samtools", "view", bam_path],
-            capture_output=True, text=True, check=True
-        )
-        reads = result.stdout.strip().split("\n") if result.stdout.strip() else []
-        count = len(reads)
-        if count == 0:
-            return {"control_read_count": 0, "control_read_length_mean_kb": 0}
-        lengths = [len(r.split("\t")[9]) for r in reads if len(r.split("\t")) > 9]
-        mean_len_kb = (sum(lengths) / len(lengths) / 1e3) if lengths else 0
-        return {
-            "control_read_count": count,
-            "control_read_length_mean_kb": mean_len_kb,
-        }
+        with zipfile.ZipFile(zip_path) as z:
+            names = set(z.namelist())
+
+            if "control.report.json" in names:
+                attrs = {
+                    a["id"]: a["value"]
+                    for a in json.loads(z.read("control.report.json")).get("attributes", [])
+                }
+                rl = attrs.get("control.readlength_mean")
+                conc = attrs.get("control.concordance_mean")
+                mode = attrs.get("control.concordance_mode")
+                out["control_read_count"] = attrs.get("control.reads_n")
+                out["control_read_length_mean_kb"] = rl / 1e3 if rl is not None else None
+                out["control_concordance_pct"] = conc * 100 if conc is not None else None
+                out["control_concordance_mode_pct"] = mode * 100 if mode is not None else None
+
+            if "loading.report.json" in names:
+                attrs = {
+                    a["id"].rsplit(".", 1)[-1]: a["value"]
+                    for a in json.loads(z.read("loading.report.json")).get("attributes", [])
+                }
+                p0 = attrs.get("productivity_0_n")
+                p1 = attrs.get("productivity_1_n")
+                p2 = attrs.get("productivity_2_n")
+                if None not in (p0, p1, p2):
+                    total = p0 + p1 + p2
+                    if total > 0:
+                        out["p1_pct_instrument"] = p1 / total * 100
+                        out["p2_pct_instrument"] = p2 / total * 100
     except Exception as e:
-        print(f"  [WARN] Could not parse control BAM {bam_path}: {e}", file=sys.stderr)
-        return {"control_read_count": None, "control_read_length_mean_kb": None}
+        print(f"  [WARN] {zip_path} 를 읽을 수 없다: {e}", file=sys.stderr)
+
+    return out
 
 
 def get_barcode(hifi_reads_dir):
@@ -240,21 +309,34 @@ def collect_well_metrics(run_dir, well, sample_name):
     metrics["sample"] = sample_name
     metrics["barcode"] = get_barcode(os.path.join(well_dir, "hifi_reads"))
 
-    ctrl_bam = os.path.join(
-        well_dir, "metadata", f"{movie_name}.sequencing_control.subreads.bam"
-    )
-    if os.path.exists(ctrl_bam):
-        metrics.update(get_control_metrics(ctrl_bam))
+    inst = read_instrument_reports(stats_dir, movie_name)
+    metrics.update({
+        "control_read_count": inst["control_read_count"],
+        "control_read_length_mean_kb": inst["control_read_length_mean_kb"],
+        "control_concordance_pct": inst["control_concordance_pct"],
+        "control_concordance_mode_pct": inst["control_concordance_mode_pct"],
+    })
+
+    # P1: 장비 실측값이 있으면 그것을 쓰고, ccs_report 근사치는 비교용으로 남긴다.
+    metrics["p1_pct_ccs_proxy"] = metrics.get("p1_pct")
+    if inst["p1_pct_instrument"] is not None:
+        metrics["p1_pct"] = inst["p1_pct_instrument"]
+        metrics["p1_source"] = "instrument"
     else:
-        print(f"    [INFO] Control BAM not found, skipping control metrics for {well}",
+        metrics["p1_source"] = "ccs_proxy"
+    metrics["p2_pct"] = inst["p2_pct_instrument"]
+
+    if inst["control_read_length_mean_kb"] is None:
+        print(f"    [INFO] {well}: {movie_name}.reports.zip 에서 control 지표를 "
+              f"읽지 못했다 — N/A 로 둔다 (subreads BAM 으로 추정하지 않는다)",
               file=sys.stderr)
-        metrics.update({"control_read_count": None, "control_read_length_mean_kb": None})
 
     # evaluate statuses
     status_keys = [
         "hifi_yield_gb", "hifi_read_length_mean_kb", "hifi_read_quality_median",
         "q30_base_pct", "p1_pct", "missing_adapter_pct",
         "control_read_count", "control_read_length_mean_kb",
+        "control_concordance_pct",
     ]
     metrics["statuses"] = {k: evaluate(k, metrics.get(k)) for k in status_keys}
     metrics["overall"] = overall_status(list(metrics["statuses"].values()))
@@ -287,6 +369,11 @@ def fmt(value, decimals=1, suffix=""):
     return f"{value:.{decimals}f}{suffix}"
 
 
+def pct(value, decimals=1):
+    """None 이면 'N/A' — 'N/A%' 가 되지 않게 한다."""
+    return "N/A" if value is None else f"{value:.{decimals}f}%"
+
+
 def build_summary_table(all_metrics, genome_size_gb):
     def est_coverage(m):
         if m.get("hifi_yield_gb") is None or genome_size_gb <= 0:
@@ -309,10 +396,15 @@ def build_summary_table(all_metrics, genome_size_gb):
         ("Read Quality (median)", lambda m: f"Q{m['hifi_read_quality_median']} {badge(m['statuses']['hifi_read_quality_median'])}"),
         ("Q30+ Bases (%)",        lambda m: f"{fmt(m['q30_base_pct'])}% {badge(m['statuses']['q30_base_pct'])}"),
         ("P1 (%)",                lambda m: f"{fmt(m['p1_pct'])}% {badge(m['statuses']['p1_pct'])}"),
+        ("P2 (%)",                lambda m: pct(m.get("p2_pct"), 2)),
         ("Missing Adapter (%)",   lambda m: f"{fmt(m['missing_adapter_pct'])}% {badge(m['statuses']['missing_adapter_pct'])}"),
         ("Mean Passes",           lambda m: fmt(m["mean_passes"], 1)),
         ("Control Reads",         lambda m: f"{int(m['control_read_count']) if m['control_read_count'] is not None else 'N/A'} {badge(m['statuses']['control_read_count'])}"),
         ("Control RL mean (kb)",  lambda m: f"{fmt(m['control_read_length_mean_kb'])} {badge(m['statuses']['control_read_length_mean_kb'])}"),
+        ("Control Concordance<br><small>(mean / mode)</small>",
+                                  lambda m: f"{pct(m.get('control_concordance_pct'))} / "
+                                            f"{pct(m.get('control_concordance_mode_pct'))} "
+                                            f"{badge(m['statuses']['control_concordance_pct'])}"),
     ]
 
     header = "".join(f"<th>{c[0]}</th>" for c in cols)
@@ -339,6 +431,8 @@ def build_threshold_table():
             crit = f"PASS ≥{t['pass_min']} | WARNING ≥{t['warn_min']} | FAIL &lt;{t['warn_min']}"
         elif d == "lower_better":
             crit = f"PASS ≤{t['pass_max']}% | WARNING ≤{t['warn_max']}% | FAIL >{t['warn_max']}%"
+        elif d == "higher_better_soft":
+            crit = f"PASS ≥{t['pass_min']}% | WARNING &lt;{t['pass_min']}%"
         elif d == "range":
             crit = (f"PASS {t['pass_min']}–{t['pass_max']}% | "
                     f"WARNING {t['warn_min']}–{t['pass_min']}% or {t['pass_max']}–{t['warn_max']}% | "
@@ -346,7 +440,7 @@ def build_threshold_table():
         rows.append(f"<tr><td><b>{t['label']}</b></td><td>{crit}</td></tr>")
     return f"""
 <table class="qc-table">
-  <thead><tr><th>Metric</th><th>QC Criteria (24-hr, 15–20 kb WGS)</th></tr></thead>
+  <thead><tr><th>Metric</th><th>QC Criteria (15–20 kb WGS 행, Revio v13.3)</th></tr></thead>
   <tbody>{"".join(rows)}</tbody>
 </table>"""
 
