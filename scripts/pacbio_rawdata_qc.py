@@ -461,7 +461,11 @@ def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
         "control_read_count", "control_read_length_mean_kb",
         "control_concordance_pct",
     ]
-    metrics["statuses"] = {k: evaluate(k, metrics.get(k)) for k in status_keys}
+    # 임계값이 꺼진 지표(--coverage-thresholds none)는 판정하지 않고 N/A 로 둔다.
+    metrics["statuses"] = {
+        k: (evaluate(k, metrics.get(k)) if k in THRESHOLDS else "N/A")
+        for k in status_keys
+    }
     metrics["overall"] = overall_status(list(metrics["statuses"].values()))
 
     return metrics
@@ -1000,11 +1004,45 @@ def parse_args():
         "--genome-size", type=float, default=2.7,
         help="Genome size in Gb for coverage estimation (default: 2.7 for mouse GRCm39)"
     )
+    parser.add_argument(
+        "--coverage-thresholds", default="35,25", metavar="PASS,WARN",
+        help="Est. Coverage 의 PASS,WARNING 선 (x). 기본 '35,25' 는 **마우스 TG "
+             "접합 검출** 근거에서 나온 내부 기준이다 — 다른 종·다른 분석에는 "
+             "그대로 쓰면 안 된다. 적용하지 않으려면 'none' (coverage 는 값만 "
+             "표시되고 판정은 N/A)."
+    )
     return parser.parse_args()
+
+
+def apply_coverage_thresholds(spec):
+    """--coverage-thresholds 를 THRESHOLDS 에 반영한다.
+
+    기본 35x/25x 는 마우스 TG 접합 검출 요구에서 나온 값이라 다른 종이나
+    다른 분석에 그대로 적용하면 근거 없는 경고가 된다 (예: 사람 WGS 는
+    문서상 기대 coverage 가 20x 다). 그래서 run 마다 지정할 수 있게 하고,
+    'none' 이면 판정 자체를 하지 않는다.
+    """
+    if spec.strip().lower() == "none":
+        THRESHOLDS.pop("est_coverage_x", None)
+        print("  [INFO] Est. Coverage 판정을 적용하지 않는다 (값만 표시)",
+              file=sys.stderr)
+        return
+    try:
+        p, w = (float(x) for x in spec.split(","))
+    except ValueError:
+        print(f"ERROR: --coverage-thresholds 형식이 'PASS,WARN' 또는 'none' 이어야 "
+              f"한다: {spec!r}", file=sys.stderr)
+        sys.exit(2)
+    if not p > w:
+        print(f"ERROR: PASS({p}) 가 WARNING({w}) 보다 커야 한다", file=sys.stderr)
+        sys.exit(2)
+    THRESHOLDS["est_coverage_x"]["pass_min"] = p
+    THRESHOLDS["est_coverage_x"]["warn_min"] = w
 
 
 def main():
     args = parse_args()
+    apply_coverage_thresholds(args.coverage_thresholds)
     run_dirs = [d.rstrip("/") for d in args.run_dir]
 
     # sample mapping
