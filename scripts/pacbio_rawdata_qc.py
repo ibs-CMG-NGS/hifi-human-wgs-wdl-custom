@@ -23,17 +23,26 @@ PacBio Revio v13.3 QC thresholds (15-20 kb WGS library 행):
 control 세 지표와 P1 은 **장비가 계산해 둔 값을 읽는다**. 직접 계산하지 않는다 —
 이유는 read_instrument_reports() 주석에 적었다.
 
-Usage (single run):
+샘플명은 **웰 metadata 의 `WellSample Name` 이 기본값**이다. `--sample-map`
+은 그것이 틀렸을 때만 덮어쓰는 용도이고, 덮어쓰면 경고와 함께 리포트에
+둘 다 기록된다. 손입력을 기본값으로 쓰다가 8샘플 중 6샘플의 QC 값이 다른
+샘플에 귀속된 사례가 있다 (docs/QC_REVISION_2026-11-27.md).
+
+Usage (single run) — 이름을 적을 필요가 없다:
   python3 pacbio_rawdata_qc.py --run-dir /data_4tb/pacbio_rawdata/r84285_XXXXXXXX \
-      --sample-map 1_A01=TG-XXXX 1_B01=TG-XXXX 1_C01=TG-XXXX 1_D01=TG-XXXX \
-      --output /path/to/output.html \
-      [--movie-time 24]
+      --output /path/to/output.html
 
 Usage (multi-run, single project):
   python3 pacbio_rawdata_qc.py \
       --run-dir /data_4tb/pacbio_rawdata/r84285_XXXXXXXX /data_4tb/pacbio_rawdata/r84285_YYYYYYYY \
-      --sample-map 1_A01=Sample1 1_B01=Sample2 1_D01=Sample3 2_A01=Sample4 \
       --output /path/to/output.html
+
+Usage (metadata 가 틀린 웰만 덮어쓰기):
+  python3 pacbio_rawdata_qc.py --run-dir ... --sample-map 1_B01=TG-6283 \
+      --output /path/to/output.html
+
+사람 샘플 등 마우스 TG 가 아닌 경우 coverage 판정을 끈다:
+  ... --genome-size 3.1 --coverage-thresholds none
 """
 
 import argparse
@@ -345,11 +354,37 @@ def get_barcode(hifi_reads_dir):
     return "unknown"
 
 
-def read_declared_insert(well_dir, movie_name):
-    """랩이 run 셋업 때 입력한 라이브러리 insert 크기를 읽는다.
+def normalize_sample_name(name):
+    """표기 차이를 지운 비교용 형태. 대소문자·구분자·`TG` 접두어를 무시한다.
 
-    <well>/metadata/<movie>.metadata.xml 의 <InsertSize> — sizing 측정 후
-    사람이 넣는 값이다 (반올림되지 않은 실측값이 들어온다. 예: 18519).
+    `ctrl-1` 과 `Ctrl1`, `6102` 와 `TG-6102` 는 같은 샘플을 가리키는 표기
+    차이다. 반면 `6238` 과 `TG-6283` 은 **다른 번호**다 — 이쪽만 경고해야
+    한다.
+    """
+    s = re.sub(r"[-_\s]", "", (name or "").lower())
+    return re.sub(r"^tg", "", s)
+
+
+def read_well_metadata(well_dir, movie_name):
+    """웰 metadata 가 스스로 말하는 값들을 읽는다 — **이름의 기본 출처다.**
+
+    `WellSample Name` 은 run 셋업 때 웰마다 입력된 샘플 이름이고, 이것이
+    QC 리포트의 **샘플명 기본값**이다. 예전에는 기본값이 웰 ID 였고 이름을
+    `--sample-map` 으로 손입력했는데, 그 경로로 2026-01 두 run 에서 8샘플 중
+    6샘플의 QC 값이 **다른 샘플에 귀속**됐다 (20260113 은 5웰 전부가 한 칸씩
+    밀렸다). 손입력은 조용히 틀리므로 기본값으로 쓰지 않는다.
+    같은 이유로 2차 분석 입력은 `scripts/well_inputs.py` 가 생성한다.
+
+    단 **metadata 도 정답이 아닐 수 있다.** 20260219/1_B01 은 metadata 가
+    `6238` 인데 올바른 계통명은 `TG-6283` 이다(하위 분석 전체가 그것을 썼다).
+    그래서 `--sample-map` 으로 덮어쓸 수 있게 두고, 덮어쓰면 경고를 내고
+    리포트에도 남긴다 — 그러면 둘 중 어느 쪽이 틀렸는지 사람이 본다.
+
+    `BioSample Name` 은 쓰지 않는다. 별도 라벨이고 분석에서 쓰는 이름이 아니다
+    (예: `2026-11-kyg-01`, `BioSample19`).
+
+    insert 크기(<InsertSize>)도 같은 파일에서 읽는다 — sizing 측정 후 사람이
+    넣는 값이다 (반올림되지 않은 실측값이 들어온다. 예: 18519).
 
     **왜 리포트에 넣나.** 실측 HiFi read length 는 이 선언값보다 **항상**
     작다 — 28웰 전수 집계에서 예외가 0건이었고, 비율은 62.4-83.6%
@@ -366,9 +401,12 @@ def read_declared_insert(well_dir, movie_name):
     사이에서 72% vs 82% 로 갈리는, 샘플이 아니라 prep 배치의 성질이다.
     선을 그으면 배치 차이를 샘플 경고로 잘못 보고하게 된다.
     """
-    out = {"declared_insert_bp": None, "library_type": None, "size_selection": None}
+    out = {"well_sample_name": None, "declared_insert_bp": None,
+           "library_type": None, "size_selection": None}
     xml_path = os.path.join(well_dir, "metadata", f"{movie_name}.metadata.xml")
     if not os.path.exists(xml_path):
+        print(f"  [WARN] {xml_path} 가 없다 — 샘플명·insert 를 읽을 수 없다",
+              file=sys.stderr)
         return out
     try:
         root = ET.parse(xml_path).getroot()
@@ -382,6 +420,11 @@ def read_declared_insert(well_dir, movie_name):
                 return el.text.strip()
         return None
 
+    for el in root.iter():
+        if el.tag.rsplit("}", 1)[-1] == "WellSample" and el.attrib.get("Name"):
+            out["well_sample_name"] = el.attrib["Name"].strip()
+            break
+
     raw = first_text("InsertSize")
     if raw is not None:
         try:
@@ -393,8 +436,12 @@ def read_declared_insert(well_dir, movie_name):
     return out
 
 
-def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
+def collect_well_metrics(run_dir, well, sample_override=None, genome_size_gb=0.0):
     """Collect all QC metrics for one well.
+
+    샘플명은 웰 metadata 의 `WellSample Name` 이 기본값이다.
+    `sample_override` (= `--sample-map` 항목) 가 주어지면 그것을 쓰되,
+    metadata 와 다르면 경고하고 `name_override` 에 둘 다 남긴다.
 
     genome_size_gb 를 주면 Est. Coverage 를 계산하고 판정까지 한다 (0 이면
     coverage 는 N/A). coverage 는 유전체 크기를 알아야 나오는 값이라서
@@ -413,8 +460,41 @@ def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
     metrics["movie"] = movie_name
     metrics["well"] = well
     metrics["run"] = os.path.basename(os.path.normpath(run_dir))
-    metrics["sample"] = sample_name
     metrics["barcode"] = get_barcode(os.path.join(well_dir, "hifi_reads"))
+
+    # 샘플명: 웰 metadata 가 기본, --sample-map 이 있으면 덮어쓴다.
+    meta = read_well_metadata(well_dir, movie_name)
+    meta_name = meta.pop("well_sample_name")
+    metrics["well_sample_name"] = meta_name
+    metrics["name_override"] = None
+    metrics["name_conflict"] = False
+    if sample_override:
+        metrics["sample"] = sample_override
+        metrics["name_source"] = "sample-map"
+        if meta_name and sample_override != meta_name:
+            # 표기 차이(대소문자·구분자·TG 접두어)와 실제 불일치를 가른다.
+            # 전자를 경고로 올리면 후자가 묻힌다 — `ctrl-1` vs `Ctrl1` 16건이
+            # `6238` vs `TG-6283` 1건을 덮어 버린다.
+            same = normalize_sample_name(meta_name) == normalize_sample_name(sample_override)
+            metrics["name_override"] = (meta_name, sample_override)
+            metrics["name_conflict"] = not same
+            if same:
+                print(f"  [INFO] {well}: 표기만 다르다 — "
+                      f"metadata='{meta_name}' / 사용='{sample_override}'",
+                      file=sys.stderr)
+            else:
+                print(f"  [WARN] {well}: --sample-map 이 웰 metadata 와 **다른 "
+                      f"샘플을 가리킨다** — metadata='{meta_name}' / "
+                      f"사용='{sample_override}'. 어느 쪽이 맞는지 확인하라 "
+                      f"(metadata 에도 오타가 있을 수 있다)", file=sys.stderr)
+    elif meta_name:
+        metrics["sample"] = meta_name
+        metrics["name_source"] = "well metadata"
+    else:
+        metrics["sample"] = well
+        metrics["name_source"] = "well ID (metadata 없음)"
+        print(f"  [WARN] {well}: metadata 에서 샘플명을 못 읽어 웰 ID 를 쓴다",
+              file=sys.stderr)
 
     inst = read_instrument_reports(stats_dir, movie_name)
     metrics.update({
@@ -439,7 +519,7 @@ def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
               file=sys.stderr)
 
     # 선언 insert 크기와 실측 read length 의 비. 판정은 붙이지 않는다 (진단용).
-    metrics.update(read_declared_insert(well_dir, movie_name))
+    metrics.update(meta)
     di = metrics.get("declared_insert_bp")
     rl = metrics.get("hifi_read_length_mean_kb")
     metrics["rl_insert_pct"] = (
@@ -554,6 +634,52 @@ def build_summary_table(all_metrics, genome_size_gb):
 </div>"""
 
 
+def build_name_note(all_metrics):
+    """샘플명의 출처를 리포트에 남긴다.
+
+    `--sample-map` 으로 metadata 를 덮어쓴 웰이 있으면 **둘 다** 적는다.
+    2026-01 두 run 에서 손입력 샘플명 때문에 8샘플 중 6샘플의 QC 값이
+    다른 샘플에 귀속됐다. 그 사실이 리포트 안에서 보여야 재발을 잡는다.
+    """
+    overrides = [m for m in all_metrics if m.get("name_override")]
+    n_meta = sum(1 for m in all_metrics if m.get("name_source") == "well metadata")
+    if not overrides:
+        return ('<div class="note"><b>샘플명 출처:</b> 전 웰 모두 웰 metadata 의 '
+                '<code>WellSample Name</code> 을 그대로 사용했습니다 '
+                '(<code>--sample-map</code> 덮어쓰기 없음).</div>')
+    conflicts = [m for m in overrides if m.get("name_conflict")]
+    rows = "".join(
+        f"<tr><td>{m['run']}</td><td>{m['well']}</td>"
+        f"<td><code>{m['name_override'][0]}</code></td>"
+        f"<td><b><code>{m['name_override'][1]}</code></b></td>"
+        f"<td>{'<b>⚠️ 다른 샘플을 가리킴</b>' if m.get('name_conflict') else '표기 차이'}</td></tr>"
+        for m in overrides
+    )
+    border = "#dc3545" if conflicts else "#856404"
+    head = (f"<b>⚠️ 웰 metadata 와 <u>다른 샘플</u>을 가리키는 덮어쓰기가 "
+            f"{len(conflicts)}건 있습니다.</b>" if conflicts else
+            "<b>샘플명 덮어쓰기 기록</b> — 모두 표기 차이입니다 "
+            "(대소문자·구분자·<code>TG</code> 접두어).")
+    return f"""
+<div class="note" style="border-left:4px solid {border}">
+  {head}
+  샘플명의 기본 출처는 웰 metadata 의 <code>WellSample Name</code> 이고
+  ({n_meta}웰이 그대로 사용), 아래 {len(overrides)}웰은
+  <code>--sample-map</code> 으로 덮어썼습니다.
+  <table class="qc-table" style="margin-top:8px">
+    <thead><tr><th>Run</th><th>Well</th><th>웰 metadata</th>
+    <th>리포트에 사용한 이름</th><th>차이</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p style="margin:6px 0 0">
+  "다른 샘플을 가리킴" 은 <b>둘 중 하나가 틀렸다</b>는 뜻입니다. metadata 쪽
+  입력 오타일 수도 있고(실례: <code>6238</code> vs 올바른
+  <code>TG-6283</code>), 손입력 쪽이 틀릴 수도 있습니다. 2026-01 두 run 에서
+  손입력 샘플명 때문에 8샘플 중 6샘플의 QC 값이 다른 샘플에 귀속된 사례가
+  있었습니다 — <code>docs/QC_REVISION_2026-11-27.md</code> 참조.</p>
+</div>"""
+
+
 def build_threshold_table():
     rows = []
     for key, t in THRESHOLDS.items():
@@ -657,6 +783,7 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
 
     summary_table = build_summary_table(all_metrics, genome_size_gb)
     threshold_table = build_threshold_table()
+    name_note = build_name_note(all_metrics)
     canvas_html, charts_js = build_bar_chart_js(all_metrics)
 
     pass_ct    = sum(1 for m in all_metrics if m["overall"] == "PASS")
@@ -770,6 +897,8 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
   <b>최악 run 비율(71.4%)에서도 통과하려면 22 kb</b> 가 필요합니다
   (74.8% 평균 기준으로는 20 kb, 이번 run 은 21.1 kb 를 선언해 4/4 통과).
 </div>
+
+{name_note}
 
 <h2>QC Metrics Summary Table</h2>
 {summary_table}
@@ -988,7 +1117,10 @@ def parse_args():
     parser.add_argument(
         "--sample-map", nargs="+", default=[],
         metavar="WELL=SAMPLE",
-        help="Map wells to sample names, e.g. 1_A01=TG-6102 1_B01=TG-6283"
+        help="샘플명을 **덮어쓸 때만** 쓴다. 기본값은 웰 metadata 의 "
+             "`WellSample Name` 이므로 보통 지정할 필요가 없다. 덮어쓰면 "
+             "metadata 와 다를 때 경고가 나오고 리포트에도 기록된다. "
+             "예: 1_B01=TG-6283 (metadata 가 '6238' 로 오타인 경우)"
     )
     parser.add_argument(
         "--output", default=None,
@@ -1063,10 +1195,11 @@ def main():
             continue
         print(f"Run: {os.path.basename(run_dir)}  →  Wells: {wells}")
         for well in wells:
-            sample = sample_map.get(well, well)
-            print(f"  Processing {well} ({sample}) ...")
-            m = collect_well_metrics(run_dir, well, sample, args.genome_size)
+            print(f"  Processing {well} ...")
+            m = collect_well_metrics(run_dir, well, sample_map.get(well),
+                                     args.genome_size)
             if m:
+                print(f"    sample = '{m['sample']}'  ({m['name_source']})")
                 all_metrics.append(m)
 
     if not all_metrics:
