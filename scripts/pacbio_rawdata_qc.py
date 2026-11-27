@@ -42,6 +42,7 @@ import os
 import re
 import glob
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -344,6 +345,54 @@ def get_barcode(hifi_reads_dir):
     return "unknown"
 
 
+def read_declared_insert(well_dir, movie_name):
+    """랩이 run 셋업 때 입력한 라이브러리 insert 크기를 읽는다.
+
+    <well>/metadata/<movie>.metadata.xml 의 <InsertSize> — sizing 측정 후
+    사람이 넣는 값이다 (반올림되지 않은 실측값이 들어온다. 예: 18519).
+
+    **왜 리포트에 넣나.** 실측 HiFi read length 는 이 선언값보다 **항상**
+    작다 — 28웰 전수 집계에서 예외가 0건이었고, 비율은 62.4-83.6%
+    (중위수 74.0%, 표준편차 5.3%p) 였다. 평균뿐 아니라 N50 도 전부 선언값
+    아래이므로 분포가 통째로 내려앉는 것이고 꼬리 효과가 아니다.
+
+    그래서 Read Length 가 낮게 나왔을 때 원인이 두 갈래다 —
+    목표 insert 를 낮게 잡았나, 아니면 라이브러리가 선언 대비 못 나왔나.
+    선언값을 같이 적어 두지 않으면 나중에 이 둘을 구분할 수 없다.
+    랩이 run 마다 의도적으로 바꾸는 값이라 더욱 기록이 필요하다
+    (2026-11 run 은 이 차이를 감안해 18.1 -> 21.1 kb 로 올렸다).
+
+    비율에는 **판정을 붙이지 않는다.** run 안에서는 2-4%p 로 모이고 run
+    사이에서 72% vs 82% 로 갈리는, 샘플이 아니라 prep 배치의 성질이다.
+    선을 그으면 배치 차이를 샘플 경고로 잘못 보고하게 된다.
+    """
+    out = {"declared_insert_bp": None, "library_type": None, "size_selection": None}
+    xml_path = os.path.join(well_dir, "metadata", f"{movie_name}.metadata.xml")
+    if not os.path.exists(xml_path):
+        return out
+    try:
+        root = ET.parse(xml_path).getroot()
+    except ET.ParseError as e:
+        print(f"  [WARN] {xml_path} 를 읽을 수 없다: {e}", file=sys.stderr)
+        return out
+
+    def first_text(name):
+        for el in root.iter():
+            if el.tag.rsplit("}", 1)[-1] == name and (el.text or "").strip():
+                return el.text.strip()
+        return None
+
+    raw = first_text("InsertSize")
+    if raw is not None:
+        try:
+            out["declared_insert_bp"] = int(float(raw))
+        except ValueError:
+            print(f"  [WARN] InsertSize 를 숫자로 읽을 수 없다: {raw!r}", file=sys.stderr)
+    out["library_type"] = first_text("LibraryType")
+    out["size_selection"] = first_text("SizeSelectionEnabled")
+    return out
+
+
 def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
     """Collect all QC metrics for one well.
 
@@ -388,6 +437,14 @@ def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
         print(f"    [INFO] {well}: {movie_name}.reports.zip 에서 control 지표를 "
               f"읽지 못했다 — N/A 로 둔다 (subreads BAM 으로 추정하지 않는다)",
               file=sys.stderr)
+
+    # 선언 insert 크기와 실측 read length 의 비. 판정은 붙이지 않는다 (진단용).
+    metrics.update(read_declared_insert(well_dir, movie_name))
+    di = metrics.get("declared_insert_bp")
+    rl = metrics.get("hifi_read_length_mean_kb")
+    metrics["rl_insert_pct"] = (
+        rl * 1e3 / di * 100 if (di and di > 0 and rl is not None) else None
+    )
 
     # Est. Coverage. 유전체 크기를 모르면 판정하지 않는다.
     if genome_size_gb and genome_size_gb > 0 and metrics.get("hifi_yield_gb") is not None:
@@ -456,8 +513,13 @@ def build_summary_table(all_metrics, genome_size_gb):
         ("HiFi Yield (Gb)",       lambda m: f"{fmt(m['hifi_yield_gb'])} {badge(m['statuses']['hifi_yield_gb'])}"),
         (f"Est. Coverage<br><small>({genome_size_gb} Gb genome · 내부 기준)</small>",
                                   lambda m: f"<b>{est_coverage(m)}</b> {badge(m['statuses']['est_coverage_x'])}"),
+        ("Declared Insert (kb)<br><small>(랩 입력값 · 판정 없음)</small>",
+                                  lambda m: ("N/A" if m.get("declared_insert_bp") is None
+                                             else f"{m['declared_insert_bp'] / 1e3:.1f}")),
         ("Read Length mean (kb)", lambda m: f"{fmt(m['hifi_read_length_mean_kb'])} {badge(m['statuses']['hifi_read_length_mean_kb'])}"),
         ("Read Length N50 (kb)",  lambda m: fmt(m["hifi_read_length_n50_kb"])),
+        ("RL / Insert<br><small>(진단용 · 판정 없음)</small>",
+                                  lambda m: pct(m.get("rl_insert_pct"))),
         ("Read Quality (median)", lambda m: f"Q{m['hifi_read_quality_median']} {badge(m['statuses']['hifi_read_quality_median'])}"),
         ("Q30+ Bases (%)",        lambda m: f"{fmt(m['q30_base_pct'])}% {badge(m['statuses']['q30_base_pct'])}"),
         ("P1 (%)",                lambda m: f"{fmt(m['p1_pct'])}% {badge(m['statuses']['p1_pct'])}"),
@@ -682,6 +744,27 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
   (Control Read Length ≥50 kb 도 24 hr 기준이라 같은 의미로 보수적입니다).<br>
   <b>Est. Coverage</b> = HiFi Yield / {genome_size_gb} Gb. 이 지표의 임계값만은
   제조사 문서가 아니라 <b>내부 기준</b>입니다 — 아래 기준표의 출처 열을 보십시오.
+</div>
+
+<div class="note">
+  <b>Declared Insert 과 RL / Insert 읽는 법 (판정 없는 진단 지표):</b><br>
+  Declared Insert 는 랩이 sizing 후 run 셋업에 입력한 값이고, 실측 HiFi read
+  length 는 <b>이 값보다 항상 작습니다</b> — 자체 6 run 28웰 전수 집계에서
+  예외가 0건이었습니다. 평균뿐 아니라 N50 도 28/28 선언값 아래여서, 짧은 조각이
+  평균을 끌어내린 게 아니라 분포가 통째로 내려앉습니다.
+  <ul style="margin:6px 0">
+    <li>관측 비율 <b>62.4 – 83.6%</b> (중위수 74.0%, 표준편차 5.3%p)</li>
+    <li>run 안에서는 2–4%p 로 모이고 <b>run 사이에서 72% 대 82% 로 갈립니다</b> —
+        샘플 DNA 품질보다 prep 배치/시약의 성질입니다. 그래서 이 비율에는
+        합불 판정을 붙이지 않았습니다.</li>
+    <li>선언 크기 자체는 비율과 거의 무관합니다 (r = +0.17) — 크게 sizing 해도
+        깎이는 비율이 더 커지지는 않습니다.</li>
+  </ul>
+  쓰는 법: Read Length 가 ⚠️ 인데 이 비율이 정상(≈75% 이상)이면 라이브러리가
+  아니라 <b>목표 insert 가 낮았던</b> 것입니다. 비율까지 낮으면 prep 을 봐야
+  합니다. 평균 15 kb 를 받으려면 선언 insert 는
+  <b>최악 run 비율(71.4%)에서도 통과하려면 22 kb</b> 가 필요합니다
+  (74.8% 평균 기준으로는 20 kb, 이번 run 은 21.1 kb 를 선언해 4/4 통과).
 </div>
 
 <h2>QC Metrics Summary Table</h2>
