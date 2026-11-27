@@ -14,10 +14,11 @@ PacBio Revio v13.3 QC thresholds (15-20 kb WGS library 행):
   - HiFi Read Quality   : PASS ≥Q30   | WARNING Q20-Q30   | FAIL <Q20
   - Q30+ Bases          : PASS ≥90%   | WARNING 85-90%    | FAIL <85%
   - P1 (ZMW productive) : PASS 50-70% | WARNING 40-50% or 70-80% | FAIL <40% or >80%
-  - Missing Adapter     : PASS <5%    | WARNING 5-10%     | FAIL ≥10%
+  - Missing Adapter     : PASS ≤10%   | WARNING >10%      (문서가 주는 선은 10% 하나뿐)
   - Control Read Count  : PASS ≥500   | WARNING 250-499   | FAIL <250
   - Control Read Length : PASS ≥50 kb | WARNING 20-50 kb  | FAIL <20 kb
   - Control Concordance : PASS ≥88%   | WARNING <88%
+  - Est. Coverage       : PASS ≥35×   | WARNING 25-35×    | FAIL <25×  (내부 기준)
 
 control 세 지표와 P1 은 **장비가 계산해 둔 값을 읽는다**. 직접 계산하지 않는다 —
 이유는 read_instrument_reports() 주석에 적었다.
@@ -47,32 +48,51 @@ from pathlib import Path
 
 
 # ─── QC Thresholds (15-20 kb WGS 행) ────────────────────────────────────────
+#
+# `source` 는 그 숫자가 어디서 왔는지다. 섞지 않는다 — 제조사 문서가 말하지
+# 않는 칸을 문서 기준인 척 두면, 나중에 "기준이 현실과 안 맞는다"는 잘못된
+# 결론으로 이어진다 (Control RL 이 그 경로로 한 번 오해를 만들었다).
+#   PACBIO  : 문서 103-604-700 (Revio v13.3) 에 적힌 값
+#   INTERNAL: 우리 분석 요구에서 나온 값. 근거를 바로 밑에 적는다.
+PACBIO = "PacBio 103-604-700 (Revio v13.3)"
+INTERNAL = "TG 접합 검출 요구 — THRESHOLDS 주석 참고"
 
 THRESHOLDS = {
+    # 문서 스펙 표: 15-20 kb 라이브러리 -> 100-120 Gb / SMRT Cell.
+    # 100 Gb 는 그 기대 구간의 아래끝이다.
     "hifi_yield_gb": {
         "pass_min": 100,
         "warn_min": 70,
         "label": "HiFi Yield (Gb)",
         "direction": "higher_better",
+        "source": PACBIO,
     },
+    # "Read lengths correspond to expected library insert size" -> 15-20 kb 행의 아래끝
     "hifi_read_length_mean_kb": {
         "pass_min": 15,
         "warn_min": 10,
         "label": "HiFi Read Length mean (kb)",
         "direction": "higher_better",
+        "source": PACBIO,
     },
     "hifi_read_quality_median": {
         "pass_min": 30,
         "warn_min": 20,
         "label": "HiFi Read Quality median (QV)",
         "direction": "higher_better",
+        "source": PACBIO,
     },
+    # 스펙 표 15-20 kb 행의 Q30+ 값. (30 hr 행인 20-25 kb 는 85% 다 —
+    # 우리는 15-20 kb 행을 쓰기로 했으므로 90% 를 유지한다.)
     "q30_base_pct": {
         "pass_min": 90,
         "warn_min": 85,
         "label": "Q30+ Bases (%)",
         "direction": "higher_better",
+        "source": PACBIO,
     },
+    # 문서: "a P1 in the range of ~50-70% is optimal", "<50% under-loaded",
+    # "once P1 increases to >80% ... most likely entered an overloaded state"
     "p1_pct": {
         "pass_min": 50,
         "pass_max": 70,
@@ -80,24 +100,33 @@ THRESHOLDS = {
         "warn_max": 80,
         "label": "P1 – ZMW Productivity (%)",
         "direction": "range",   # 50-70% optimal
+        "source": PACBIO,
     },
+    # 문서가 말하는 것은 "Missing adapter should ideally be <10%" 한 줄뿐이다.
+    # 예전에는 PASS <5% / WARNING 5-10% 로 쪼개 두었는데 5% 는 근거가 없었다.
+    # 문서대로 10% 한 선만 쓰고, 그 아래를 우리가 다시 쪼개지 않는다.
     "missing_adapter_pct": {
-        "pass_max": 5,
-        "warn_max": 10,
+        "pass_max": 10,
         "label": "Missing Adapter (%)",
-        "direction": "lower_better",
+        "direction": "lower_better_soft",
+        "source": PACBIO,
     },
     "control_read_count": {
         "pass_min": 500,
         "warn_min": 250,
         "label": "Control Read Count",
         "direction": "higher_better",
+        "source": PACBIO,
     },
+    # "control read length is typically >=50 kb for 24 hrs movie time".
+    # 우리는 30 hr 이므로 이 선은 보수적이다. 반드시 polymerase read length 로
+    # 재야 한다 — read_instrument_reports() 주석 참고.
     "control_read_length_mean_kb": {
         "pass_min": 50,
         "warn_min": 20,
         "label": "Control Read Length mean (kb)",
         "direction": "higher_better",
+        "source": PACBIO,
     },
     # 문서는 "mean & mode are typically ≥88%" 한 줄만 말한다. 그 아래를 다시
     # WARNING / FAIL 로 쪼갤 근거가 문서에 없으므로 쪼개지 않는다 (2단 판정).
@@ -105,6 +134,27 @@ THRESHOLDS = {
         "pass_min": 88,
         "label": "Control Read Concordance mean (%)",
         "direction": "higher_better_soft",
+        "source": PACBIO,
+    },
+    # **제조사 문서는 이 기준을 줄 수 없다.** 문서의 "expected coverage 20x" 는
+    # 인간 유전체(3.1 Gb) 기준의 estimate 이고, 우리는 마우스(2.7 Gb)에서
+    # TG 통합 접합을 찾는다. 그래서 "TG 접합 검출에 몇 x 가 필요한가" 라는
+    # 우리 분석 요구에서 나와야 한다.
+    #
+    # 근거:
+    #   - 지금까지 납품한 분석은 35.3-39.3x 구간에서 수행됐다. 그 아래에서
+    #     접합을 찾아낸 실적이 없다.
+    #   - TG-6283 의 오른쪽 접합은 37.2x 에서 지지 리드가 ~1개였다. 즉 35x
+    #     부근도 접합 하나를 리드 한 개로 버티는 지점이고, 더 낮아지면
+    #     접합을 놓칠 위험이 실재한다.
+    # 따라서 35x 를 "검증된 깊이", 25x 를 "접합 검출을 기대하기 어려운 깊이"로
+    # 둔다. 이 숫자는 실적이 늘면 다시 볼 값이다.
+    "est_coverage_x": {
+        "pass_min": 35,
+        "warn_min": 25,
+        "label": "Est. Coverage (×)",
+        "direction": "higher_better",
+        "source": INTERNAL,
     },
 }
 
@@ -129,6 +179,9 @@ def evaluate(metric_key, value):
     elif direction == "higher_better_soft":
         # 문서가 기대값 한 개만 주는 지표. FAIL 선을 우리가 만들지 않는다.
         return "PASS" if value >= t["pass_min"] else "WARNING"
+
+    elif direction == "lower_better_soft":
+        return "PASS" if value <= t["pass_max"] else "WARNING"
 
     elif direction == "lower_better":
         if value <= t["pass_max"]:
@@ -291,8 +344,13 @@ def get_barcode(hifi_reads_dir):
     return "unknown"
 
 
-def collect_well_metrics(run_dir, well, sample_name):
-    """Collect all QC metrics for one well."""
+def collect_well_metrics(run_dir, well, sample_name, genome_size_gb=0.0):
+    """Collect all QC metrics for one well.
+
+    genome_size_gb 를 주면 Est. Coverage 를 계산하고 판정까지 한다 (0 이면
+    coverage 는 N/A). coverage 는 유전체 크기를 알아야 나오는 값이라서
+    여기서만 계산할 수 있다.
+    """
     well_dir = os.path.join(run_dir, well)
     stats_dir = os.path.join(well_dir, "statistics")
 
@@ -331,9 +389,17 @@ def collect_well_metrics(run_dir, well, sample_name):
               f"읽지 못했다 — N/A 로 둔다 (subreads BAM 으로 추정하지 않는다)",
               file=sys.stderr)
 
+    # Est. Coverage. 유전체 크기를 모르면 판정하지 않는다.
+    if genome_size_gb and genome_size_gb > 0 and metrics.get("hifi_yield_gb") is not None:
+        metrics["est_coverage_x"] = metrics["hifi_yield_gb"] / genome_size_gb
+    else:
+        metrics["est_coverage_x"] = None
+    metrics["genome_size_gb"] = genome_size_gb
+
     # evaluate statuses
     status_keys = [
-        "hifi_yield_gb", "hifi_read_length_mean_kb", "hifi_read_quality_median",
+        "hifi_yield_gb", "est_coverage_x",
+        "hifi_read_length_mean_kb", "hifi_read_quality_median",
         "q30_base_pct", "p1_pct", "missing_adapter_pct",
         "control_read_count", "control_read_length_mean_kb",
         "control_concordance_pct",
@@ -376,10 +442,9 @@ def pct(value, decimals=1):
 
 def build_summary_table(all_metrics, genome_size_gb):
     def est_coverage(m):
-        if m.get("hifi_yield_gb") is None or genome_size_gb <= 0:
+        if m.get("est_coverage_x") is None:
             return "N/A"
-        cov = m["hifi_yield_gb"] / genome_size_gb
-        return f"{cov:.1f}×"
+        return f"{m['est_coverage_x']:.1f}×"
 
     cols = [
         ("Sample",                lambda m: f"<b>{m['sample']}</b>"),
@@ -389,8 +454,8 @@ def build_summary_table(all_metrics, genome_size_gb):
         ("Overall",               lambda m: badge(m["overall"])),
         ("HiFi Reads (M)",        lambda m: fmt(m["hifi_reads"] / 1e6, 2)),
         ("HiFi Yield (Gb)",       lambda m: f"{fmt(m['hifi_yield_gb'])} {badge(m['statuses']['hifi_yield_gb'])}"),
-        (f"Est. Coverage<br><small>({genome_size_gb} Gb genome)</small>",
-                                  lambda m: f"<b>{est_coverage(m)}</b>"),
+        (f"Est. Coverage<br><small>({genome_size_gb} Gb genome · 내부 기준)</small>",
+                                  lambda m: f"<b>{est_coverage(m)}</b> {badge(m['statuses']['est_coverage_x'])}"),
         ("Read Length mean (kb)", lambda m: f"{fmt(m['hifi_read_length_mean_kb'])} {badge(m['statuses']['hifi_read_length_mean_kb'])}"),
         ("Read Length N50 (kb)",  lambda m: fmt(m["hifi_read_length_n50_kb"])),
         ("Read Quality (median)", lambda m: f"Q{m['hifi_read_quality_median']} {badge(m['statuses']['hifi_read_quality_median'])}"),
@@ -433,16 +498,33 @@ def build_threshold_table():
             crit = f"PASS ≤{t['pass_max']}% | WARNING ≤{t['warn_max']}% | FAIL >{t['warn_max']}%"
         elif d == "higher_better_soft":
             crit = f"PASS ≥{t['pass_min']}% | WARNING &lt;{t['pass_min']}%"
+        elif d == "lower_better_soft":
+            crit = f"PASS ≤{t['pass_max']}% | WARNING >{t['pass_max']}%"
         elif d == "range":
             crit = (f"PASS {t['pass_min']}–{t['pass_max']}% | "
                     f"WARNING {t['warn_min']}–{t['pass_min']}% or {t['pass_max']}–{t['warn_max']}% | "
                     f"FAIL &lt;{t['warn_min']}% or >{t['warn_max']}%")
-        rows.append(f"<tr><td><b>{t['label']}</b></td><td>{crit}</td></tr>")
+        src = t.get("source", "—")
+        tag = ('<span style="background:#e7f1ff;color:#0b5394;padding:1px 6px;'
+               'border-radius:3px;font-size:0.85em;white-space:nowrap">문서</span>'
+               if src == PACBIO else
+               '<span style="background:#fde9d9;color:#8a4b08;padding:1px 6px;'
+               'border-radius:3px;font-size:0.85em;white-space:nowrap">내부</span>')
+        rows.append(f"<tr><td><b>{t['label']}</b></td><td>{crit}</td>"
+                    f"<td>{tag} <small>{src}</small></td></tr>")
     return f"""
 <table class="qc-table">
-  <thead><tr><th>Metric</th><th>QC Criteria (15–20 kb WGS 행, Revio v13.3)</th></tr></thead>
+  <thead><tr><th>Metric</th><th>QC Criteria (15–20 kb WGS 행, Revio v13.3)</th>
+  <th>기준 출처</th></tr></thead>
   <tbody>{"".join(rows)}</tbody>
-</table>"""
+</table>
+<p style="font-size:0.9em;color:#555;margin-top:6px">
+  <b>문서</b> = PacBio 103-604-700 (SMRT Link Run Details report overview, Revio v13.3) 에
+  적힌 값. <b>내부</b> = 제조사 문서가 줄 수 없어 우리 분석 요구에서 정한 값 —
+  근거는 스크립트의 THRESHOLDS 주석에 적어 두었다.
+  문서가 기대값 하나만 말하는 지표(Missing Adapter, Control Concordance)는
+  그 아래를 임의로 쪼개지 않고 2단(PASS/WARNING)으로만 판정한다.
+</p>"""
 
 
 def build_bar_chart_js(all_metrics):
@@ -576,7 +658,8 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
 <body>
 <div class="header">
   <h1>PacBio HiFi Raw Data QC Report</h1>
-  <p>Run: {run_label} &nbsp;|&nbsp; Movie time: {movie_time} hr &nbsp;|&nbsp; Generated: {now}</p>
+  <p>Run: {run_label} &nbsp;|&nbsp; Movie time: <b>{movie_time} hr</b> (실제)
+     &nbsp;|&nbsp; Generated: {now}</p>
 </div>
 <div class="content">
 
@@ -589,9 +672,16 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
 </div>
 
 <div class="note">
-  <b>참고:</b> QC 기준은 PacBio Revio v13.3, 24-hr movie time, 15–20 kb WGS library 기준입니다
-  (SMRT Link Run Details report overview, PN 103-604-700 Rev 01).
-  기대 coverage = HiFi Yield / {genome_size_gb} Gb (genome size).
+  <b>기준:</b> PacBio Revio v13.3 스펙 표의 <b>15–20 kb 라이브러리 행</b>
+  (HiFi yield 100–120 Gb, Q30+ 90%) — SMRT Link Run Details report overview,
+  PN 103-604-700 Rev 01.<br>
+  <b>movie time:</b> 이 run 의 실제 collection time 은 <b>{movie_time} hr</b> 입니다.
+  문서 표는 15–20 kb 행을 24 hr 과 짝지었고 30 hr 은 20–25 kb 행에 둡니다 —
+  즉 <b>우리 조건과 정확히 일치하는 행이 문서에 없습니다.</b> 더 긴 movie 는
+  yield 와 read length 에 유리하므로 15–20 kb 행을 쓰는 것은 보수적인 선택입니다
+  (Control Read Length ≥50 kb 도 24 hr 기준이라 같은 의미로 보수적입니다).<br>
+  <b>Est. Coverage</b> = HiFi Yield / {genome_size_gb} Gb. 이 지표의 임계값만은
+  제조사 문서가 아니라 <b>내부 기준</b>입니다 — 아래 기준표의 출처 열을 보십시오.
 </div>
 
 <h2>QC Metrics Summary Table</h2>
@@ -692,8 +782,12 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
     <div class="cause">원인: 소모품 불량, 장비 이상, 샘플 과다 로딩</div>
   </div>
   <div class="ts-card warn">
-    <h4>⚠️ Control Read Length &lt; 50 kb (24-hr 기준)</h4>
+    <h4>⚠️ Control Read Length &lt; 50 kb (문서의 24-hr 기준선)</h4>
     <ul>
+      <li><b>먼저 단위를 확인하십시오.</b> 이 값은 control 의 <b>polymerase read
+          length</b>(한 ZMW 의 모든 통과 합) 여야 합니다. subread 길이 평균을
+          쓰면 23~25 kb 로 나와서 항상 경고가 뜹니다 — 과거에 그 버그로 28샘플
+          전부가 경고였습니다. 현재는 장비의 control.report.json 을 읽습니다.</li>
       <li>장비 및 소모품 성능 저하 의심</li>
       <li>Sequencing plate 개봉 후 사용 시간 확인 (Open Limit: 200시간)</li>
       <li>Polymerase kit 유통기한 및 보관 상태 점검</li>
@@ -709,12 +803,13 @@ def build_html(all_metrics, run_dirs, movie_time, genome_size_gb):
 <h3>📉 HiFi Yield / Read Length 이상 (Control 정상인 경우)</h3>
 <div class="ts-grid">
   <div class="ts-card warn">
-    <h4>⚠️ HiFi Yield 낮음 (&lt;100 Gb, 24-hr 15–20 kb WGS 기준)</h4>
+    <h4>⚠️ HiFi Yield 낮음 (&lt;100 Gb, 15–20 kb WGS 행 기준)</h4>
     <ul>
       <li>Control이 정상이면 샘플 품질 또는 라이브러리 문제</li>
       <li>Insert size distribution 확인: Read Length Density plot 참조</li>
       <li>P1이 정상 범위(50–70%)인지 확인 — P1 낮으면 OPLC 조정이 우선</li>
-      <li>15–20 kb library: 기대 Yield 100–120 Gb / SMRT Cell (24-hr)</li>
+      <li>15–20 kb library: 기대 Yield 100–120 Gb / SMRT Cell (문서 표는 24-hr 기준.
+          30 hr 로 돌렸다면 이보다 유리한 조건이므로 100 Gb 미달은 더 분명한 신호다)</li>
       <li>Yield = P1 reads × Polymerase Read Length 임을 참고</li>
     </ul>
     <div class="cause">원인: 낮은 P1, 짧은 insert size, DNA 품질 불량, 로딩 농도 부적절</div>
@@ -813,8 +908,10 @@ def parse_args():
         help="Output HTML path (default: QC_Report_rawdata.html in first run-dir)"
     )
     parser.add_argument(
-        "--movie-time", type=int, default=24,
-        help="Movie collection time in hours (default: 24)"
+        "--movie-time", type=int, default=30,
+        help="이 run 의 실제 movie collection time (시간). 표시용이며 임계값을 "
+             "바꾸지 않는다. 우리 장비의 6개 run 은 모두 30 hr 이었다 "
+             "(MovieLength=1800.0 분). default: 30"
     )
     parser.add_argument(
         "--genome-size", type=float, default=2.7,
@@ -847,7 +944,7 @@ def main():
         for well in wells:
             sample = sample_map.get(well, well)
             print(f"  Processing {well} ({sample}) ...")
-            m = collect_well_metrics(run_dir, well, sample)
+            m = collect_well_metrics(run_dir, well, sample, args.genome_size)
             if m:
                 all_metrics.append(m)
 
